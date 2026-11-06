@@ -388,7 +388,7 @@ test('отказ песочницы: при выключенных апрува�
     config: CONFIG,
     epoch: queue.epoch,
     sandboxFor: () => ({ mode: 'read-only', root: '/tmp' }),
-    approval: { request: async () => 'approved' },
+    approval: { request: async () => 'allowed-once' },
   })
   const call = tools.find((tool) => tool.name === 'nodes_call')
 
@@ -427,7 +427,7 @@ test('отказ песочницы: апрувы выключены — отк�
     config: CONFIG,
     epoch: queue.epoch,
     sandboxFor: () => ({ mode: 'read-only', root: '/tmp' }),
-    approval: { request: async () => { asked += 1; return 'approved' } },
+    approval: { request: async () => { asked += 1; return 'allowed-once' } },
   })
   const call = tools.find((tool) => tool.name === 'nodes_call')
   const running = call.execute({ node: nodeId, api: apiId, method: 'exec', data: { command: 'touch /etc/x' } }, { agent: null })
@@ -478,7 +478,7 @@ test('отказ песочницы: согласие человека прев�
     config: CONFIG,
     epoch: queue.epoch,
     sandboxFor: () => ({ mode: 'workspace-write', root: '/tmp' }),
-    approval: { request: async (request) => { asked.push(request); return 'approved' } },
+    approval: { request: async (request) => { asked.push(request); return 'allowed-once' } },
   })
   const call = tools.find((tool) => tool.name === 'nodes_call')
   const running = call.execute({ node: nodeId, api: apiId, method: 'exec', data: { command: 'touch /etc/x' } }, { agent: {}, name: 'nodes_call' })
