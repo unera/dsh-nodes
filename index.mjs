@@ -165,7 +165,10 @@ export function apply (ctx, config) {
     config,
     epoch,
     sandboxFor,
-    approval: ctx.approval ?? (typeof ctx.get === 'function' ? ctx.get('approval') : null),
+    // `ctx.approval` напрямую нельзя: сервис не объявлен в inject, cordis
+    // бросит «cannot get property "approval" without inject». Через get — можно,
+    // и в хосте без апрувов плагин остаётся живым.
+    approval: typeof ctx.get === 'function' ? ctx.get('approval') : null,
   })
 
   let unregister = []
