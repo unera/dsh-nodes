@@ -129,66 +129,80 @@ export async function apply (ctx, config) {
 
   // Админка живёт только за owner-гейтом ядра: страница и её API — под /api.
   // Публичный префикс остаётся для узлов и заявок, ничего админского там нет.
+  //
+  // Регистрация обязана идти внутри `ctx.effect`: cordis привязывает владение
+  // маршрутом к волокну, и `register` вне эффекта просто не доходит до дела.
+  // Тогда панель получает 404 и выглядит как «маршрутов нет».
+  const warn = (message, extra) => {
+    // ctx.logger в этом профиле молчит, поэтому диагностика — в консоль,
+    // как у остальных наших плагинов
+    // eslint-disable-next-line no-console
+    console.warn(`[dsh-nodes] ${message}${extra === undefined ? '' : ' ' + JSON.stringify(extra)}`)
+  }
+
   if (typeof ctx.inject === 'function') {
-    try {
-      log('info', 'ждём сервис connection для админ-маршрутов')
-      ctx.inject(['connection'], (connCtx) => {
-        const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
-        if (!connection || typeof connection.fetch?.register !== 'function') {
-          log('warn', 'connection без fetch.register(): админка недоступна')
-          return
-        }
-        log('info', 'connection получен, регистрирую админ-маршруты')
-        // origin для pairing-ссылки берём из запроса: страница за прокси
+    ctx.inject(['connection'], (connCtx) => {
+      const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
+      if (connection === null || typeof connection.fetch?.register !== 'function') {
+        warn('connection без fetch.register(): админка не отдаётся')
+        return
+      }
+      const mount = () => {
         const originOf = (request) => config.publicUrl?.replace(/\/$/, '') ?? `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
         const deps = { store, queue, config, prefix: config.routePrefix, presence }
-        log('info', 'админка: регистрация начата', { prefix: config.routePrefix })
-        const routes = []
-        // порядок важен: точные пути раньше общего
-        routes.push(connection.fetch.register({
-          path: '/api/dsh-nodes/admin',
-          methods: ['GET'],
-          requestBody: 'buffered',
-          fetch: async () => new Response(renderAdmin(), {
-            status: 200,
-            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-          }),
-        }))
-        for (const [path, methods] of [
-          ['/api/dsh-nodes/nodes', ['GET']],
-          ['/api/dsh-nodes/catalog', ['GET']],
-          ['/api/dsh-nodes/pending', ['GET']],
-        ]) {
-          const rest = path.replace('/api/dsh-nodes', '')
-          routes.push(connection.fetch.register({
-            path,
-            methods,
-            requestBody: 'buffered',
-            fetch: async (request) => {
-              const result = handleAdmin(deps, request.method, rest, {})
-              return Response.json(result.body, { status: result.status })
-            },
-          }))
-        }
-        // все изменения — одной точкой: номера узлов динамические, а точный
-        // маршрут нельзя объявить шаблоном
-        routes.push(connection.fetch.register({
-          path: '/api/dsh-nodes/admin',
-          methods: ['POST'],
+        const json = (status, body) => new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+        })
+        const route = (path, methods, run) => connection.fetch.register({
+          path,
+          methods,
           requestBody: 'buffered',
           fetch: async (request) => {
-            const payload = await request.json().catch(() => ({}))
-            const result = handleAdminOp({ ...deps, origin: originOf(request) }, payload)
-            return Response.json(result.body, { status: result.status })
+            try {
+              const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
+              const result = await run(body, request)
+              return json(result.status, result.body)
+            } catch (error) {
+              return json(500, { code: 'internal', message: String(error?.message ?? error) })
+            }
           },
-        }))
-        log('info', 'админ-маршрутов зарегистрировано', { count: routes.length })
-        if (typeof connCtx?.effect === 'function') connCtx.effect(() => () => { for (const dispose of routes) try { dispose?.() } catch {} })
-        else disposers.push(...routes)
+        })
+        const disposers = [
+          connection.fetch.register({
+            path: '/api/dsh-nodes/admin',
+            methods: ['GET'],
+            requestBody: 'buffered',
+            fetch: async () => new Response(renderAdmin(), {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+            }),
+          }),
+          route('/api/dsh-nodes/nodes', ['GET'], () => handleAdmin(deps, 'GET', '/nodes', {})),
+          route('/api/dsh-nodes/catalog', ['GET'], () => handleAdmin(deps, 'GET', '/catalog', {})),
+          route('/api/dsh-nodes/pending', ['GET'], () => handleAdmin(deps, 'GET', '/pending', {})),
+          route('/api/dsh-nodes/admin', ['POST'], (body, request) => handleAdminOp({ ...deps, origin: originOf(request) }, body)),
+        ]
+        // eslint-disable-next-line no-console
+        console.log(`[dsh-nodes] админ-маршрутов зарегистрировано: ${disposers.length}`)
+        return disposers
+      }
+
+      if (typeof connCtx?.effect !== 'function') {
+        warn('нет connCtx.effect(): маршруты зарегистрировать негде')
+        return
+      }
+      connCtx.effect(() => {
+        const disposers = mount()
+        return () => {
+          for (const dispose of disposers) {
+            try {
+              dispose?.()
+            } catch {}
+          }
+        }
       })
-    } catch (error) {
-      log('warn', `админка не подключилась: ${error.message}`)
-    }
+    })
   }
 
   const sweep = setInterval(() => queue.sweep(), 30_000)
