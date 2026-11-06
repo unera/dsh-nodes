@@ -157,6 +157,7 @@ export function apply (ctx, config) {
         console.warn('[dsh-nodes] sandboxPolicy без режима: считаю read-only')
         return { mode: 'read-only' }
       }
+      console.log('[dsh-nodes] sandboxPolicy:', policy.mode, 'root:', policy.workspaceRoot ?? '-')
       return { mode: policy.mode, ...(policy.workspaceRoot ? { root: policy.workspaceRoot } : {}) }
     } catch (error) {
       console.warn(`[dsh-nodes] sandboxPolicy не разрешился (${error.message}): считаю read-only`)
