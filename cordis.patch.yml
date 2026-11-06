@@ -1,0 +1,14 @@
+# Bundle layer for dsh-nodes: installing this package mounts the plugin, so the
+# settings list can switch it off. Host-specific knobs (routePrefix behind a
+# different proxy path, adminToken) belong in the profile's own patch as an
+# id-targeted override of `nodes`.
+- insert:
+    - id: nodes
+      name: '@dr-co/dsh-nodes'
+      config:
+        routePrefix: /dsh-nodes
+        defaultTimeout: 60
+        maxBatch: 5
+        maxQueuePerNode: 100
+        aliveTimeoutSeconds: 60
+        maxPendingEnroll: 50
