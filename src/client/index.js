@@ -226,6 +226,7 @@ function NodesPanel () {
   const [link, setLink] = useState(null)
   const [ttl, setTtl] = useState(600)
   const [newName, setNewName] = useState('')
+  const [audit, setAudit] = useState([])
   // одна открытая форма на всю панель: открытие другой закрывает прежнюю
   const [editing, setEditing] = useState(null)
   const [tip, setTip] = useState(null)
@@ -235,10 +236,15 @@ function NodesPanel () {
 
   async function load () {
     try {
-      const [list, waiting] = await Promise.all([request('/nodes'), request('/pending')])
+      const [list, waiting, events] = await Promise.all([
+        request('/nodes'),
+        request('/pending'),
+        request('/audit?limit=50').catch(() => ({ audit: [] })),
+      ])
       setNodes(list.nodes ?? [])
       setEpoch(list.epoch ?? null)
       setPending(waiting.pending ?? [])
+      setAudit(events.audit ?? [])
     } catch (error) {
       say(error.message, 'bad')
     }
@@ -409,6 +415,29 @@ function NodesPanel () {
         style: { left: `${Math.round(tip.x)}px`, top: `${Math.round(tip.y)}px`, transform: 'translateX(-50%)' },
       }, tip.text)
       : null,
+
+    h('section', { key: 'audit' }, [
+      h('h3', { key: 'h' }, 'Аудит (последние события)'),
+      audit.length === 0
+        ? h('div', { key: 'e', className: 'empty' }, 'пока пусто')
+        : h('table', { key: 't' }, [
+          h('thead', { key: 'head' }, h('tr', null, [
+            h('th', { key: 'w' }, 'когда'), h('th', { key: 'k' }, 'что'),
+            h('th', { key: 'n' }, 'узел'), h('th', { key: 'm' }, 'режим'), h('th', { key: 'c' }, 'команда'),
+          ])),
+          h('tbody', { key: 'body' }, audit.map((row) => h('tr', { key: row.id }, [
+            h('td', { key: 'w', className: 'muted' }, new Date(row.at).toLocaleTimeString()),
+            h('td', { key: 'k' }, row.kind === 'denied'
+              ? h('span', { style: { color: '#ef4444' } }, 'отказ')
+              : row.kind === 'approve'
+                ? `${row.outcome === 'approved' ? 'разрешил' : 'запретил'}`
+                : 'исполнено'),
+            h('td', { key: 'n' }, String(row.node ?? '—')),
+            h('td', { key: 'm' }, h('code', null, row.mode ?? '—')),
+            h('td', { key: 'c' }, h('code', null, String(row.command ?? '').slice(0, 120))),
+          ]))),
+        ]),
+    ]),
 
     h('section', { key: 'create' }, [
       h('h3', { key: 'h' }, 'Новый узел вручную'),
