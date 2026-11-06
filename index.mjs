@@ -17,6 +17,7 @@ import { ArgsError, checkArgs } from './lib/args.mjs'
 import { createPresence } from './lib/ws.mjs'
 import { renderAdmin } from './lib/admin.mjs'
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
+import { createTools } from './lib/tools.mjs'
 
 export const name = 'dsh-nodes'
 export const inject = ['tools', 'webServer']
@@ -77,9 +78,19 @@ export async function apply (ctx, config) {
     commandTtl: config.commandTtl,
   })
   const adminToken = resolveAdminToken(config, dir)
+  // cordis: `ctx.logger(name)` — фабрика именованного логгера, не объект с уровнями
+  let logger = null
+  try {
+    logger = typeof ctx.logger === 'function' ? ctx.logger('dsh-nodes') : ctx.logger ?? null
+  } catch {
+    logger = null
+  }
   const log = (level, message, extra) => {
-    const logger = ctx.logger?.[level] ?? ctx.logger?.info
-    if (typeof logger === 'function') logger.call(ctx.logger, `[dsh-nodes] ${message}`, extra ?? '')
+    const write = logger?.[level] ?? logger?.info
+    if (typeof write !== 'function') return
+    try {
+      write.call(logger, extra === undefined ? message : `${message} ${JSON.stringify(extra)}`)
+    } catch {}
   }
   log('info', `состояние: ${join(dir, 'dsh-nodes.sqlite')}, epoch ${epoch}`)
 
@@ -172,112 +183,7 @@ export async function apply (ctx, config) {
     }
   }
 
-  const tools = [
-    {
-      name: 'nodes_list',
-      description: 'Список узлов: алиасы, онлайн, сколько молчит, какие API держит.',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
-      output: {
-        schema: { type: 'object' },
-        render: (_args, value) => ({ type: 'text', text: renderNodes(value) }),
-      },
-      async execute () {
-        return {
-          nodes: store.nodes().map((node) => ({
-            id: node.id,
-            aliases: node.aliases,
-            name: node.name,
-            online: Boolean(node.last_seen && Date.now() - node.last_seen < config.aliveTimeoutSeconds * 1000),
-            lastSeen: node.last_seen,
-            apis: node.apis,
-            access: node.access,
-          })),
-          epoch,
-        }
-      },
-    },
-    {
-      name: 'nodes_catalog',
-      description: 'Справочник API: номер, имя, методы. С него начинается любой вызов.',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
-      output: {
-        schema: { type: 'object' },
-        render: (_args, value) => ({ type: 'text', text: renderCatalog(value) }),
-      },
-      async execute () {
-        return { apis: store.catalog() }
-      },
-    },
-    {
-      name: 'nodes_api',
-      description: 'Методы одного API со схемами аргументов.',
-      parameters: {
-        type: 'object',
-        properties: { api: { type: 'number' } },
-        required: ['api'],
-        additionalProperties: false,
-      },
-      output: {
-        schema: { type: 'object' },
-        render: (_args, value) => ({ type: 'text', text: renderApi(value) }),
-      },
-      async execute (args) {
-        const def = store.api(Number(args.api))
-        if (!def) return { error: `unknown api ${args.api}` }
-        return { api: def }
-      },
-    },
-    {
-      name: 'nodes_call',
-      description: 'Вызвать метод API на узле. Возвращает {status, message, results}.',
-      parameters: {
-        type: 'object',
-        properties: {
-          node: { type: ['number', 'string'] },
-          api: { type: 'number' },
-          method: { type: 'string' },
-          data: { type: 'object' },
-          timeout: { type: 'number' },
-        },
-        required: ['node', 'api', 'method'],
-        additionalProperties: false,
-      },
-      output: {
-        schema: { type: 'object' },
-        render: (_args, value) => ({ type: 'text', text: renderCall(value) }),
-      },
-      async execute (args, execution) {
-        const node = typeof args.node === 'number' ? store.node(args.node) : store.nodeByAlias(String(args.node))
-        if (!node) return { status: 'error', code: 'unknown_node', message: `unknown node ${args.node}`, results: null }
-        const def = store.api(Number(args.api))
-        if (!def) return { status: 'error', code: 'unknown_api', message: `unknown api ${args.api}`, results: null }
-        if (!store.nodeHasApi(node.id, def.id)) {
-          return { status: 'error', code: 'unknown_api', message: `узел ${node.id} не держит api ${def.id}`, results: null }
-        }
-        try {
-          checkArgs(def, args.method, args.data ?? {})
-        } catch (error) {
-          if (error instanceof ArgsError) {
-            return { status: 'error', code: error.code, message: error.message, results: null }
-          }
-          throw error
-        }
-        const { seq, promise } = queue.enqueue({
-          nodeId: node.id,
-          api: def.id,
-          method: args.method,
-          args: args.data ?? {},
-          timeout: args.timeout ?? node.default_timeout ?? undefined,
-          sandbox: sandboxFor(execution?.agent?.session),
-        })
-        if (seq === null) return promise
-        presence?.notify(node.id)
-        execution?.signal?.addEventListener?.('abort', () => queue.cancel(node.id, seq), { once: true })
-        const outcome = await promise
-        return { node: node.id, api: def.id, method: args.method, ...outcome }
-      },
-    },
-  ]
+  const tools = createTools({ store, queue, notify: (nodeId) => presence?.notify(nodeId), config, epoch, sandboxFor })
 
   let unregister = []
   for (const tool of tools) {
@@ -300,46 +206,7 @@ export async function apply (ctx, config) {
 
 // ── рендер для модели ──────────────────────────────────────────────────────
 
-function renderNodes ({ nodes }) {
-  if (!nodes.length) return 'узлов нет'
-  return nodes.map((node) => {
-    const fresh = node.online ? 'online' : node.lastSeen ? `offline ${ago(node.lastSeen)}` : 'никогда не выходил на связь'
-    return `${node.id} — ${node.aliases.join(', ')} (${fresh}), access: ${node.access}, apis: ${node.apis.join(', ') || '—'}`
-  }).join('\n')
-}
 
-function renderCatalog ({ apis }) {
-  if (!apis.length) return 'справочник пуст: ни один узел ещё не объявлял API'
-  return apis.map((api) => {
-    const name = api.version ? `${api.name} (${api.version})` : api.name
-    const methods = api.methods.map((m) => m.method).join(', ')
-    return `${api.id} — ${name} (${methods}), держит узлов: ${api.refcount}`
-  }).join('\n')
-}
 
-function renderApi ({ api, error }) {
-  if (error) return error
-  const lines = [`${api.id} — ${api.name}${api.version ? ' ' + api.version : ''}`]
-  for (const m of api.methods ?? []) {
-    const args = Object.entries(m.args?.properties ?? {}).map(([key, rule]) => `${key}: ${rule.type ?? 'any'}`)
-    lines.push(`  ${m.method}(${args.join(', ')})${m.description ? ' — ' + m.description : ''}`)
-  }
-  return lines.join('\n')
-}
 
-function renderCall (value) {
-  const head = `${value.status}${value.code ? ' (' + value.code + ')' : ''}`
-  if (value.status === 'ok') {
-    const text = (value.results ?? []).map((block) => block.type === 'text' ? block.text : `[${block.type}]`).join('\n')
-    return `${head}\n${text}`
-  }
-  return `${head}: ${value.message ?? ''}`
-}
 
-function ago (ms) {
-  const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000))
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
-  return `${Math.round(seconds / 86400)}d`
-}
