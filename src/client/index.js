@@ -8,7 +8,7 @@
  *
  * Сборка: scripts/build-client.mjs.
  */
-import { h, useEffect, useState } from 'react'
+import { createElement as h, useEffect, useState } from 'react'
 
 const BASE = '/api/dsh-nodes'
 
@@ -248,15 +248,33 @@ function NodesPanel () {
   ])
 }
 
-/** Точка входа клиентского плагина. */
-export function apply (ctx) {
-  const disposeStyles = mountStyles()
-  if (typeof ctx?.effect === 'function') ctx.effect(() => disposeStyles)
+/** Имя клиентского плагина: по нему host пишет диагностику. */
+export const name = 'dsh-nodes'
+/** Сервисы, без которых панель не смонтировать. */
+export const inject = ['slots']
 
-  const slots = ctx?.slots
-  if (!slots?.register) return
-  slots.inject('settings.section', () => slots.register(
-    { name: 'settings.section', id: 'dsh-nodes', order: 35, label: () => 'Узлы' },
-    NodesPanel,
-  ))
+/**
+ * Точка входа клиентского плагина.
+ *
+ * Всё в try/catch: ошибка в панели не должна ронять загрузку всего клиента —
+ * host показывает «Failed to load plugins» и человек теряет весь интерфейс.
+ * Поэтому падаем мягко, но громко в консоль.
+ */
+export function apply (ctx) {
+  try {
+    const disposeStyles = mountStyles()
+    if (typeof ctx?.effect === 'function') ctx.effect(() => disposeStyles)
+
+    const slots = ctx?.slots
+    if (!slots?.register) {
+      console.warn('[dsh-nodes] слоты недоступны: панель не смонтирована')
+      return
+    }
+    slots.inject('settings.section', () => slots.register(
+      { name: 'settings.section', id: 'dsh-nodes', order: 35, label: () => 'Узлы' },
+      NodesPanel,
+    ))
+  } catch (error) {
+    console.warn('[dsh-nodes] клиентская половина не смонтировалась:', error)
+  }
 }
