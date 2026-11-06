@@ -512,3 +512,28 @@ test('отказ песочницы: согласие человека прев�
   const outcome = await running
   assert.equal(outcome.status, 'ok')
 })
+
+test('аргумент sandbox переводится в словарь DSH: ro → read-only, rw → workspace-write, full → danger-full-access', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'map-sandbox' }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [{ name: 'bash', version: '6', methods: [{ method: 'exec', args: { type: 'object' } }] }])
+  const apiId = announced.apis[0]
+  const tools = createTools({ store, queue, config: CONFIG, epoch: queue.epoch, sandboxFor: () => ({ mode: 'danger-full-access' }) })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+
+  for (const [arg, expected] of [['ro', 'ro'], ['rw', 'rw'], ['full', 'full']]) {
+    const running = call.execute({ node: nodeId, api: apiId, method: 'exec', data: {}, sandbox: arg }, {})
+    let taken = { commands: [] }
+    for (let i = 0; i < 50 && !taken.commands.length; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      taken = queue.take(nodeId, { after: 0 })
+    }
+    assert.equal(taken.commands[0].sandbox.mode, expected, `аргумент ${arg} должен дать ${expected}`)
+    await fetch(`${base}/v1/commands/${taken.commands[0].seq}/result`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ok: true, results: [{ type: 'text', text: 'ok' }] }),
+    })
+    await running
+  }
+})

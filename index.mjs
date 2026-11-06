@@ -23,6 +23,7 @@ import { renderAdmin } from './lib/admin.mjs'
 import { handleAdmin, handleAdminOp } from './lib/admin-api.mjs'
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 import { createTools } from './lib/tools.mjs'
+import { modeFromPolicy } from './lib/policy.mjs'
 
 export const name = 'dsh-nodes'
 // cordis: `inject` — это карта «имя сервиса → конфиг». К `ctx.<service>` можно
@@ -150,22 +151,13 @@ export function apply (ctx, config) {
   }
 
   // ── тулы модели (план §5) ────────────────────────────────────────────────
-  const sandboxFor = (session) => {
-    try {
-      const service = ctx.sandboxPolicy ?? (typeof ctx.get === 'function' ? ctx.get('sandboxPolicy') : null)
-      const policy = service?.resolve?.({ session })
-      if (!policy?.mode) {
-        // не смогли узнать режим — работаем по самому узкому, а не без песочницы:
-        // «неизвестно» не должно означать «полный доступ»
-        console.warn('[dsh-nodes] sandboxPolicy без режима: считаю read-only')
-        return { mode: 'read-only' }
-      }
-      return { mode: policy.mode, ...(policy.workspaceRoot ? { root: policy.workspaceRoot } : {}) }
-    } catch (error) {
-      console.warn(`[dsh-nodes] sandboxPolicy не разрешился (${error.message}): считаю read-only`)
-      return { mode: 'read-only' }
-    }
-  }
+  const sandboxFor = (session) =>
+    modeFromPolicy(
+      ctx.sandboxPolicy ?? (typeof ctx.get === 'function' ? ctx.get('sandboxPolicy') : null),
+      session,
+      (message) => console.warn(`[dsh-nodes] ${message}`),
+    )
+
 
   const tools = createTools({
     store,
