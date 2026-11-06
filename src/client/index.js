@@ -3,8 +3,7 @@
  *
  * Панель нативная, как у остальных наших плагинов: React-компонент внутри слота
  * `settings.section`, данные — с `/api/dsh-nodes/*` (owner-гейт ядра, кука
- * владельца уходит сама, токенов в браузере нет). Никаких iframe: они дают
- * вторую полосу прокрутки, чужую тему и лишний слой.
+ * владельца уходит сама, токенов в браузере нет).
  *
  * Сборка: scripts/build-client.mjs.
  */
@@ -25,7 +24,6 @@ async function request (path, options = {}) {
   if (text && type.includes('json')) {
     parsed = JSON.parse(text)
   } else if (text) {
-    // HTML фолбэка или текст ошибки: показываем начало, а не «JSON.parse: …»
     throw new Error(`${response.status}: ${text.replace(/\s+/g, ' ').slice(0, 120)}`)
   }
   if (!response.ok) throw new Error(parsed?.message ?? `${response.status}`)
@@ -36,27 +34,35 @@ const op = (payload) => request('/op', { method: 'POST', body: JSON.stringify(pa
 
 const STYLE_ID = 'dsh-nodes-styles'
 const CSS = `
-.dshn { display: flex; flex-direction: column; gap: 18px; font-size: 14px; }
+.dshn { display: flex; flex-direction: column; gap: 16px; font-size: 14px; }
 .dshn h3 { font-size: 13px; letter-spacing: .04em; text-transform: uppercase; opacity: .6; margin: 0 0 8px; font-weight: 600; }
 .dshn table { width: 100%; border-collapse: collapse; }
-.dshn th, .dshn td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.25); vertical-align: top; }
+.dshn th, .dshn td { text-align: left; padding: 7px 8px; border-bottom: 1px solid rgba(128,128,128,.25); vertical-align: top; }
 .dshn th { font-size: 12px; opacity: .6; font-weight: 600; }
 .dshn code { font: 12px ui-monospace, SFMono-Regular, monospace; }
 .dshn button { font: inherit; padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; cursor: pointer; }
 .dshn button:hover { border-color: currentColor; }
 .dshn button.primary { border-color: #3b82f6; color: #3b82f6; }
-.dshn button.danger { border-color: #ef4444; color: #ef4444; }
-.dshn input { font: inherit; padding: 4px 7px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; }
+.dshn button.danger { color: #ef4444; }
+.dshn button.glyph { padding: 4px 6px; display: inline-flex; align-items: center; justify-content: center; border-color: transparent; }
+.dshn button.glyph:hover { background: rgba(128,128,128,.15); border-color: rgba(128,128,128,.4); }
+.dshn input, .dshn textarea { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; box-sizing: border-box; width: 100%; }
 .dshn .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dshn .muted { opacity: .6; }
-.dshn .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); }
+.dshn .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); margin-left: 6px; white-space: nowrap; }
 .dshn .on { color: #16a34a; border-color: #16a34a88; }
-.dshn .off { opacity: .6; }
+.dshn .off { opacity: .55; }
 .dshn .msg { min-height: 18px; font-size: 13px; }
 .dshn .msg.bad { color: #ef4444; }
 .dshn .msg.good { color: #16a34a; }
 .dshn .secret { font: 12px ui-monospace, monospace; word-break: break-all; padding: 8px; border: 1px dashed #f59e0b; border-radius: 8px; margin-top: 8px; }
 .dshn .empty { opacity: .6; padding: 8px 0; }
+.dshn .aliases { font-size: 12px; opacity: .6; margin-top: 2px; }
+.dshn .chips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px; }
+.dshn .chip { font: 12px ui-monospace, monospace; padding: 1px 6px; border-radius: 4px; background: rgba(128,128,128,.15); white-space: nowrap; }
+.dshn .editor { border: 1px solid rgba(128,128,128,.35); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.dshn .editor label { font-size: 12px; opacity: .7; display: block; margin-bottom: 4px; }
+.dshn .actions { display: flex; gap: 2px; justify-content: flex-end; }
 `
 
 function mountStyles () {
@@ -77,47 +83,103 @@ function ago (ms) {
   return `${Math.round(s / 86400)}д`
 }
 
-/** Одна строка устройства: алиасы правятся здесь же. */
-function NodeRow ({ node, busy, onAliases, onToken, onDelete }) {
-  const [aliases, setAliases] = useState(node.aliases.join(', '))
-  const signature = node.aliases.join(',')
-  useEffect(() => { setAliases(node.aliases.join(', ')) }, [signature])
+/** Глифы свои, без внешних библиотек. */
+function Glyph ({ kind }) {
+  const paths = {
+    edit: 'M4 20h4l10-10-4-4L4 16v4zm12.7-12.7 1.6-1.6a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0l-1.6 1.6 3 3z',
+    unplug: 'M8.5 7.5 6 10a4.5 4.5 0 0 0 0 6.4l1.6 1.6M15.5 16.5 18 14a4.5 4.5 0 0 0 0-6.4l-1.6-1.6M9 15l6-6',
+    trash: 'M9 3h6l1 2h4v2H4V5h4l1-2zM6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 8z',
+  }
+  return h('svg', {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 24 24',
+    fill: kind === 'unplug' ? 'none' : 'currentColor',
+    stroke: kind === 'unplug' ? 'currentColor' : 'none',
+    strokeWidth: kind === 'unplug' ? 1.8 : 0,
+    strokeLinecap: 'round',
+    'aria-hidden': 'true',
+  }, h('path', { d: paths[kind] }))
+}
 
+function GlyphButton ({ kind, title, onClick, disabled, className }) {
+  return h('button', {
+    className: `glyph ${className ?? ''}`,
+    title,
+    'aria-label': title,
+    disabled: Boolean(disabled),
+    onClick,
+  }, h(Glyph, { kind }))
+}
+
+/** Форма правки узла: имя и алиасы. Открывается над списком. */
+function NodeEditor ({ node, busy, onSave, onCancel }) {
+  const outside = () => node.aliases.filter((alias) => alias.toLowerCase() !== node.name.toLowerCase())
+  const [name, setName] = useState(node.name)
+  const [aliases, setAliases] = useState(outside().join(', '))
+
+  useEffect(() => {
+    setName(node.name)
+    setAliases(node.aliases.filter((alias) => alias.toLowerCase() !== node.name.toLowerCase()).join(', '))
+  }, [node.id, node.name, node.aliases.join(',')])
+
+  const submit = () => {
+    const list = aliases.split(',').map((value) => value.trim()).filter(Boolean)
+    onSave(node.id, { name: name.trim(), aliases: list })
+  }
+
+  return h('div', { className: 'editor' }, [
+    h('div', { key: 'title', className: 'row' }, [
+      h('strong', { key: 't' }, `Узел ${node.id}`),
+      h('span', { key: 'n', className: 'muted' }, 'правка имени и алиасов'),
+    ]),
+    h('div', { key: 'name' }, [
+      h('label', { key: 'l' }, 'Имя узла'),
+      h('input', {
+        key: 'i',
+        value: name,
+        onChange: (event) => setName(event.target.value),
+        onKeyDown: (event) => { if (event.key === 'Enter') submit() },
+      }),
+    ]),
+    h('div', { key: 'aliases' }, [
+      h('label', { key: 'l' }, 'Алиасы через запятую (по любому из них узел можно позвать)'),
+      h('textarea', {
+        key: 't',
+        rows: 2,
+        value: aliases,
+        onChange: (event) => setAliases(event.target.value),
+      }),
+    ]),
+    h('div', { key: 'actions', className: 'row' }, [
+      h('button', { key: 'save', className: 'primary', disabled: busy || !name.trim(), onClick: submit }, 'сохранить'),
+      h('button', { key: 'cancel', disabled: busy, onClick: onCancel }, 'отмена'),
+    ]),
+  ])
+}
+
+function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
   return h('tr', null, [
     h('td', { key: 'id' }, h('code', null, node.id)),
     h('td', { key: 'name' }, [
-      h('div', { key: 'n' }, node.name),
-      h('div', { key: 'a', className: 'row', style: { marginTop: 4 } }, [
-        h('input', {
-          key: 'i',
-          value: aliases,
-          placeholder: 'алиасы через запятую',
-          style: { width: 220 },
-          onChange: (event) => setAliases(event.target.value),
-        }),
-        h('button', {
-          key: 'b',
-          disabled: busy,
-          onClick: () => onAliases(node.id, aliases.split(',').map((v) => v.trim()).filter(Boolean)),
-        }, 'сохранить'),
+      h('div', { key: 'n' }, [
+        h('span', { key: 'name' }, node.name),
+        h('span', { key: 'pill', className: `pill ${node.online ? 'on' : 'off'}` }, node.online ? 'online' : `offline · ${ago(node.lastSeen)}`),
       ]),
+      h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || 'без алиасов'),
     ]),
-    h('td', { key: 'state' }, [
-      h('span', { key: 'p', className: `pill ${node.online ? 'on' : 'off'}` }, node.online ? 'online' : 'offline'),
-      h('span', { key: 't', className: 'muted' }, node.online ? '' : ` ${ago(node.lastSeen)}`),
-      node.queued ? h('div', { key: 'q', className: 'muted', style: { fontSize: 12 } }, `в очереди ${node.queued}`) : null,
-    ]),
-    h('td', { key: 'apis' },
+    h('td', { key: 'apis' }, h('div', { className: 'chips' },
       node.apis.length
-        ? node.apis.map((api) => h('code', { key: api.id, style: { marginRight: 8 } }, `${api.name}${api.version ? ' @' + api.version : ''}`))
-        : h('span', { className: 'muted' }, '—')),
+        ? node.apis.map((api) => h('span', { key: api.id, className: 'chip' }, `${api.name}${api.version ? `@${api.version}` : ''}`))
+        : h('span', { className: 'muted' }, '—'))),
     h('td', { key: 'access' }, [
       h('div', { key: 'a' }, node.access),
       node.clientVersion ? h('div', { key: 'v', className: 'muted', style: { fontSize: 12 } }, node.clientVersion) : null,
     ]),
-    h('td', { key: 'actions' }, h('div', { className: 'row' }, [
-      h('button', { key: 't', disabled: busy, onClick: () => onToken(node.id) }, 'токен'),
-      h('button', { key: 'd', className: 'danger', disabled: busy, onClick: () => onDelete(node.id) }, 'удалить'),
+    h('td', { key: 'actions' }, h('div', { className: 'actions' }, [
+      h(GlyphButton, { key: 'e', kind: 'edit', title: 'Редактировать', disabled: busy, onClick: () => onEdit(node.id) }),
+      h(GlyphButton, { key: 't', kind: 'unplug', title: 'Отозвать токен', disabled: busy, onClick: () => onRevoke(node.id) }),
+      h(GlyphButton, { key: 'd', kind: 'trash', title: 'Удалить', disabled: busy, className: 'danger', onClick: () => onDelete(node.id) }),
     ])),
   ])
 }
@@ -133,6 +195,8 @@ function NodesPanel () {
   const [link, setLink] = useState(null)
   const [ttl, setTtl] = useState(600)
   const [newName, setNewName] = useState('')
+  // одна открытая форма на всю панель: открытие другой закрывает прежнюю
+  const [editing, setEditing] = useState(null)
 
   const say = (text, kind = '') => setMessage({ text, kind })
 
@@ -161,17 +225,34 @@ function NodesPanel () {
       if (result?.token) setSecret(result.token)
       if (result?.rejected?.length) say(`заняты другими узлами: ${result.rejected.join(', ')}`, 'bad')
       await load()
+      return true
     } catch (error) {
       say(error.message, 'bad')
+      return false
     } finally {
       setBusy(false)
     }
   }
 
+  const editingNode = editing == null ? null : nodes.find((node) => node.id === editing) ?? null
+
   return h('div', { className: 'dshn' }, [
     h('div', { key: 'msg', className: `msg ${message.kind}` },
       message.text || (epoch != null ? `epoch ${epoch}, устройств ${nodes.length}` : '')),
     secret ? h('div', { key: 'secret', className: 'secret' }, `токен (показывается один раз): ${secret}`) : null,
+
+    editingNode
+      ? h(NodeEditor, {
+        key: `editor-${editingNode.id}`,
+        node: editingNode,
+        busy,
+        onCancel: () => setEditing(null),
+        onSave: async (id, body) => {
+          const ok = await run({ op: 'update', id, body }, 'сохранено')
+          if (ok) setEditing(null)
+        },
+      })
+      : null,
 
     h('section', { key: 'pair' }, [
       h('h3', { key: 'h' }, 'Подключить клиента'),
@@ -224,17 +305,22 @@ function NodesPanel () {
         ? h('div', { key: 'e', className: 'empty' }, 'нет')
         : h('table', { key: 't' }, [
           h('thead', { key: 'head' }, h('tr', null, [
-            h('th', { key: 'i' }, 'id'), h('th', { key: 'n' }, 'имя / алиасы'), h('th', { key: 's' }, 'состояние'),
+            h('th', { key: 'i' }, 'id'), h('th', { key: 'n' }, 'имя / алиасы'),
             h('th', { key: 'a' }, 'API'), h('th', { key: 'd' }, 'доступ'), h('th', { key: 'x' }, ''),
           ])),
           h('tbody', { key: 'body' }, nodes.map((node) => h(NodeRow, {
             key: node.id,
             node,
             busy,
-            onAliases: (id, aliases) => run({ op: 'update', id, body: { aliases } }, 'алиасы сохранены'),
-            onToken: (id) => run({ op: 'token', id }, 'токен перевыпущен'),
+            onEdit: (id) => setEditing((current) => (current === id ? null : id)),
+            onRevoke: (id) => {
+              if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
+              setSecret(null)
+              run({ op: 'token', id }, 'токен перевыпущен')
+            },
             onDelete: (id) => {
-              if (typeof window !== 'undefined' && !window.confirm(`удалить узел ${id}?`)) return
+              if (typeof window !== 'undefined' && !window.confirm(`Удалить узел ${id}?`)) return
+              if (editing === id) setEditing(null)
               run({ op: 'delete', id }, 'удалён')
             },
           }))),
@@ -255,18 +341,10 @@ function NodesPanel () {
   ])
 }
 
-/** Имя клиентского плагина: по нему host пишет диагностику. */
+/** Точка входа клиентского плагина. */
 export const name = 'dsh-nodes'
-/** Сервисы, без которых панель не смонтировать. */
 export const inject = ['slots']
 
-/**
- * Точка входа клиентского плагина.
- *
- * Всё в try/catch: ошибка в панели не должна ронять загрузку всего клиента —
- * host показывает «Failed to load plugins» и человек теряет весь интерфейс.
- * Поэтому падаем мягко, но громко в консоль.
- */
 export function apply (ctx) {
   try {
     const disposeStyles = mountStyles()

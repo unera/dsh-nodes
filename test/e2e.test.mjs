@@ -305,3 +305,16 @@ test('админ-API: заявка approve и reject через функции',
   assert.equal(rejected.status, 200)
   assert.equal(rejected.body.status, 'rejected')
 })
+
+test('админ-API: переименование меняет имя, а не добавляет алиас', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'rename-me' }) })
+  const id = created.body.node.id
+  const updated = await admin(`/nodes/${id}/update`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'renamed', aliases: ['renamed', 'второе имя'] }),
+  })
+  assert.equal(updated.status, 200)
+  assert.equal(updated.body.node.name, 'renamed')
+  assert.deepEqual(updated.body.node.aliases.sort(), ['renamed', 'второе имя'].sort())
+  assert.equal(await admin(`/nodes/${id}/update`, { method: 'POST', body: JSON.stringify({ name: 'nbw' }) }).then((r) => r.status), 409)
+})
