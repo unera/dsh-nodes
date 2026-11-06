@@ -318,3 +318,20 @@ test('админ-API: переименование меняет имя, а не 
   assert.deepEqual(updated.body.node.aliases.sort(), ['renamed', 'второе имя'].sort())
   assert.equal(await admin(`/nodes/${id}/update`, { method: 'POST', body: JSON.stringify({ name: 'nbw' }) }).then((r) => r.status), 409)
 })
+
+test('отзыв токена открывает заявку заново', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'revoke-me' }) })
+  const id = created.body.node.id
+  const token = created.body.token
+
+  // узел работает
+  const alive = await api.state(base, token)
+  assert.equal(alive.status, 200)
+
+  const revoked = await admin(`/nodes/${id}/token`, { method: 'POST', body: '' })
+  assert.equal(revoked.status, 200)
+  assert.equal(revoked.body.revoked, true)
+
+  // старый токен больше не пускают: клиент получает ошибку авторизации
+  await assert.rejects(() => api.state(base, token), /token|unauthorized|токен/i)
+})
