@@ -11,6 +11,7 @@ import { after, before, test } from 'node:test'
 
 import { Store } from '../lib/db.mjs'
 import { Queue } from '../lib/queue.mjs'
+import { createTools, sandboxReport } from '../lib/tools.mjs'
 import { createNodesServer } from '../lib/server.mjs'
 import { handleAdmin } from '../lib/admin-api.mjs'
 import * as api from '../../dsh-node-client/lib/api.mjs'
@@ -95,7 +96,8 @@ test('команда едет до узла и возвращается резу
   assert.equal(taken.body.commands.length, 1)
   assert.equal(taken.body.commands[0].seq, 1)
   assert.equal(taken.body.commands[0].method, 'exec')
-  assert.equal(taken.body.commands[0].sandbox.mode, 'danger-full-access')
+  // клиент получает свой словарь режимов: ro / rw / full
+  assert.equal(taken.body.commands[0].sandbox.mode, 'full')
 
   const closed = await api.result(base, token, 1, { ok: true, results: [{ type: 'text', text: 'привет\n' }] })
   assert.equal(closed.status, 200)
@@ -370,4 +372,80 @@ test('токен по заявке получает только тот, кто 
   assert.equal(own.status, 200)
   const body = await own.json()
   assert.ok(body.token)
+})
+
+test('отказ песочницы: при выключенных апрувах спрашивать не идут', async () => {
+  // узел, которому владелец запретил апрувы
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'no-ask' }) })
+  const nodeId = created.body.node.id
+  store.updateNode(nodeId, { allow_escalation: 0, access: 'read-only' })
+  // узлу нужен свой API, иначе тул откажет раньше песочницы
+  const announced = store.announce(nodeId, [{ name: 'bash', version: '9', methods: [{ method: 'exec', args: { type: 'object' } }] }])
+  const apiId = announced.apis[0]
+  const tools = createTools({
+    store,
+    queue,
+    config: CONFIG,
+    epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'read-only', root: '/tmp' }),
+    approval: { request: async () => 'approved' },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+
+  // ответ клиента с отказом песочницы
+  const running = call.execute({ node: nodeId, api: apiId, method: 'exec', data: { command: 'touch /etc/x' } }, { agent: null })
+  // ждём, пока тул поставит свою команду в очередь
+  let taken = { commands: [] }
+  for (let i = 0; i < 50 && !taken.commands.length; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    taken = queue.take(nodeId, { after: 0 })
+  }
+  await fetch(`${base}/v1/commands/${taken.commands[0].seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ok: true,
+      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'ro', denied: true, signature: 'read-only file system' } }) }],
+    }),
+  })
+  const outcome = await running
+  assert.equal(outcome.code, 'sandbox_denied')
+  assert.match(outcome.message, /потолок узла — ro/)
+})
+
+
+test('отказ песочницы: апрувы выключены — отказ окончательный', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'ask-off' }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [{ name: 'bash', version: '8', methods: [{ method: 'exec', args: { type: 'object' } }] }])
+  const apiId = announced.apis[0]
+  store.updateNode(nodeId, { allow_escalation: 0, access: 'workspace-write' })
+  let asked = 0
+  const tools = createTools({
+    store,
+    queue,
+    config: CONFIG,
+    epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'read-only', root: '/tmp' }),
+    approval: { request: async () => { asked += 1; return 'approved' } },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const running = call.execute({ node: nodeId, api: apiId, method: 'exec', data: { command: 'touch /etc/x' } }, { agent: null })
+  let taken = { commands: [] }
+  for (let i = 0; i < 50 && !taken.commands.length; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    taken = queue.take(nodeId, { after: 0 })
+  }
+  await fetch(`${base}/v1/commands/${taken.commands[0].seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ok: true,
+      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'ro', denied: true, signature: 'read-only file system' } }) }],
+    }),
+  })
+  const outcome = await running
+  assert.equal(outcome.code, 'sandbox_denied')
+  assert.match(outcome.message, /запрещены владельцем/)
+  assert.equal(asked, 0, 'при выключенных апрувах человека не спрашивают')
 })

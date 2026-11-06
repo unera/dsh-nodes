@@ -158,7 +158,15 @@ export function apply (ctx, config) {
     }
   }
 
-  const tools = createTools({ store, queue, notify: (nodeId) => presence?.notify(nodeId), config, epoch, sandboxFor })
+  const tools = createTools({
+    store,
+    queue,
+    notify: (nodeId) => presence?.notify(nodeId),
+    config,
+    epoch,
+    sandboxFor,
+    approval: ctx.approval ?? (typeof ctx.get === 'function' ? ctx.get('approval') : null),
+  })
 
   let unregister = []
   for (const tool of tools) {
