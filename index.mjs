@@ -204,80 +204,83 @@ export function apply (ctx, config) {
 /**
  * Зарегистрировать owner-гейтовые маршруты админки.
  *
- * `connection.fetch.register` обязан вызываться внутри `ctx.effect`: cordis
- * привязывает владение маршрутом к волокну, а регистрация вне эффекта не
- * доходит до дела. И вызывать это надо синхронно из `apply`, до первого
- * `await`, иначе волокно уже другое.
+ * Сервис `connection` лежит прямо на контексте плагина — так его берёт dsh-im
+ * (`ctx.connection.fetch.register`), и регистрация идёт синхронно в activate.
+ * Регистрация внутри `effect` до дела не доходит: маршрутов не появляется, а
+ * панель получает 404.
  */
 function mountAdminRoutes ({ ctx, config, getDeps }) {
-  if (typeof ctx?.inject !== 'function') {
-    console.log('[dsh-nodes] mountAdminRoutes: у контекста нет inject')
-    return
-  }
-  console.log('[dsh-nodes] mountAdminRoutes: ждём connection')
-  ctx.inject(['connection'], (connCtx) => {
-    console.log('[dsh-nodes] mountAdminRoutes: connection пришёл, typeof effect =', typeof connCtx?.effect)
-    const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
-    if (connection === null || typeof connection.fetch?.register !== 'function') {
+  const mount = (connection) => {
+    if (connection === null || typeof connection?.fetch?.register !== 'function') {
       console.warn('[dsh-nodes] connection без fetch.register(): админка не отдаётся')
       return
     }
-    if (typeof connCtx?.effect !== 'function') {
-      console.warn('[dsh-nodes] нет connCtx.effect(): маршруты зарегистрировать негде')
-      return
-    }
-    connCtx.effect(() => {
-      const json = (status, body) => new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-      })
-      const depsOf = (request) => {
-        const deps = getDeps()
-        if (!deps.store) return null
-        const origin = deps.config.publicUrl?.replace(/\/$/, '') ??
-          `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
-        return { ...deps, origin }
-      }
-      const route = (path, methods, run) => connection.fetch.register({
-        path,
-        methods,
-        requestBody: 'buffered',
-        fetch: async (request) => {
-          try {
-            const deps = depsOf(request)
-            if (!deps) return json(503, { code: 'starting', message: 'плагин ещё поднимается' })
-            const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
-            const result = await run(deps, body)
-            return json(result.status, result.body)
-          } catch (error) {
-            return json(500, { code: 'internal', message: String(error?.message ?? error) })
-          }
-        },
-      })
-      const disposers = [
-        connection.fetch.register({
-          path: '/api/dsh-nodes/admin',
-          methods: ['GET'],
-          requestBody: 'buffered',
-          fetch: async () => new Response(renderAdmin(), {
-            status: 200,
-            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-          }),
-        }),
-        route('/api/dsh-nodes/nodes', ['GET'], (deps) => handleAdmin(deps, 'GET', '/nodes', {})),
-        route('/api/dsh-nodes/catalog', ['GET'], (deps) => handleAdmin(deps, 'GET', '/catalog', {})),
-        route('/api/dsh-nodes/pending', ['GET'], (deps) => handleAdmin(deps, 'GET', '/pending', {})),
-        route('/api/dsh-nodes/admin', ['POST'], (deps, body) => handleAdminOp(deps, body)),
-      ]
-      console.log(`[dsh-nodes] админ-маршрутов зарегистрировано: ${disposers.length}`)
-      return () => {
-        for (const dispose of disposers) {
-          try {
-            dispose?.()
-          } catch {}
-        }
-      }
+    const json = (status, body) => new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
     })
+    const depsOf = (request) => {
+      const deps = getDeps()
+      if (!deps.store) return null
+      const origin = deps.config.publicUrl?.replace(/\/$/, '') ??
+        `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
+      return { ...deps, origin }
+    }
+
+    const routes = [
+      {
+        path: '/api/dsh-nodes/admin',
+        methods: ['GET'],
+        run: async () => new Response(renderAdmin(), {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+        }),
+        raw: true,
+      },
+      { path: '/api/dsh-nodes/nodes', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/nodes', {}) },
+      { path: '/api/dsh-nodes/catalog', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/catalog', {}) },
+      { path: '/api/dsh-nodes/pending', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/pending', {}) },
+      { path: '/api/dsh-nodes/admin', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
+    ]
+
+    let count = 0
+    for (const route of routes) {
+      try {
+        connection.fetch.register({
+          path: route.path,
+          methods: route.methods,
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            try {
+              const deps = depsOf(request)
+              if (!deps) return json(503, { code: 'starting', message: 'плагин ещё поднимается' })
+              if (route.raw) return route.run(request)
+              const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
+              const result = await route.run(deps, body)
+              return json(result.status, result.body)
+            } catch (error) {
+              return json(500, { code: 'internal', message: String(error?.message ?? error) })
+            }
+          },
+        })
+        count += 1
+      } catch (error) {
+        console.warn(`[dsh-nodes] маршрут ${route.path} ${route.methods.join('/')} не встал: ${error?.message ?? error}`)
+      }
+    }
+    console.log(`[dsh-nodes] админ-маршрутов зарегистрировано: ${count}`)
+  }
+
+  const direct = ctx?.connection ?? (typeof ctx?.get === 'function' ? ctx.get('connection') : null)
+  if (direct && typeof direct?.fetch?.register === 'function') {
+    mount(direct)
+    return
+  }
+
+  console.warn('[dsh-nodes] ctx.connection нет, ждём сервис через inject')
+  if (typeof ctx?.inject !== 'function') return
+  ctx.inject(['connection'], (connCtx) => {
+    mount(connCtx?.connection ?? connCtx?.get?.('connection') ?? null)
   })
 }
 
