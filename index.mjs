@@ -16,6 +16,7 @@ import { createNodesServer } from './lib/server.mjs'
 import { ArgsError, checkArgs } from './lib/args.mjs'
 import { createPresence } from './lib/ws.mjs'
 import { renderAdmin } from './lib/admin.mjs'
+import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 
 export const name = 'dsh-nodes'
 export const inject = ['tools', 'webServer']
@@ -145,6 +146,20 @@ export async function apply (ctx, config) {
   if (typeof sweep.unref === 'function') sweep.unref()
   ctx.effect(() => () => clearInterval(sweep))
   if (presence) ctx.effect(() => () => presence.close())
+
+  // ── секция системного промпта: как обращаться с узлами ───────────────────
+  const systemPrompt = typeof ctx.get === 'function' ? ctx.get('systemPrompt') ?? null : ctx.systemPrompt ?? null
+  if (systemPrompt && typeof systemPrompt.section === 'function') {
+    try {
+      const disposeSection = systemPrompt.section({ name: SECTION_NAME, order: SECTION_ORDER, text: PROMPT_TEXT })
+      if (typeof ctx.effect === 'function') ctx.effect(() => disposeSection)
+      else disposers.push(disposeSection)
+    } catch (error) {
+      log('warn', `секция промпта не зарегистрировалась: ${error.message}`)
+    }
+  } else {
+    log('warn', 'systemPrompt недоступен: модель не получит инструкций про узлы')
+  }
 
   // ── тулы модели (план §5) ────────────────────────────────────────────────
   const sandboxFor = (session) => {
