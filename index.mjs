@@ -25,10 +25,10 @@ import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 import { createTools } from './lib/tools.mjs'
 
 export const name = 'dsh-nodes'
-// cordis: к `ctx.<service>` можно обращаться только если сервис объявлен в
-// inject — иначе `Error: cannot get property "connection" without inject`.
-// `connection` необязателен: без него плагин жив, просто без админки.
-export const inject = { required: ['systemPrompt', 'tools', 'webServer'], optional: ['connection'] }
+// cordis: `inject` — это карта «имя сервиса → конфиг». К `ctx.<service>` можно
+// обращаться только если сервис в ней объявлен, иначе
+// `Error: cannot get property "connection" without inject` и плагин не поднимется.
+export const inject = { systemPrompt: null, tools: null, webServer: null, connection: null }
 
 /** Конфиг плагина (план §10). */
 export const Config = z.object({
