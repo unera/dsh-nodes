@@ -15,6 +15,7 @@ import { Queue } from './lib/queue.mjs'
 import { createNodesServer } from './lib/server.mjs'
 import { ArgsError, checkArgs } from './lib/args.mjs'
 import { createPresence } from './lib/ws.mjs'
+import { renderAdmin } from './lib/admin.mjs'
 
 export const name = 'dsh-nodes'
 export const inject = ['tools', 'webServer']
@@ -112,6 +113,33 @@ export async function apply (ctx, config) {
       }
     }
   })
+
+  // Та же страница за owner-гейтом ядра: /api/dsh-nodes/admin пускает только
+  // владельца DSH, публичный /dsh-nodes/admin — по админ-токену.
+  if (typeof ctx.inject === 'function') {
+    try {
+      ctx.inject(['connection'], (connCtx) => {
+        const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
+        if (!connection || typeof connection.fetch?.register !== 'function') {
+          log('warn', 'connection без fetch.register(): owner-гейтовой копии админки не будет')
+          return
+        }
+        const registerAdmin = () => connection.fetch.register({
+          path: '/api/dsh-nodes/admin',
+          methods: ['GET'],
+          requestBody: 'buffered',
+          fetch: async () => new Response(renderAdmin({ apiBase: `${config.routePrefix}/v1/admin` }), {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+          }),
+        })
+        if (typeof connCtx?.effect === 'function') connCtx.effect(() => registerAdmin())
+        else disposers.push(registerAdmin())
+      })
+    } catch (error) {
+      log('warn', `owner-гейтовая админка не подключилась: ${error.message}`)
+    }
+  }
 
   const sweep = setInterval(() => queue.sweep(), 30_000)
   if (typeof sweep.unref === 'function') sweep.unref()

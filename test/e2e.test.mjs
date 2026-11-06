@@ -205,6 +205,7 @@ test('админка отдаётся страницей, без токена', 
   assert.match(response.headers.get('content-type'), /text\/html/)
   const html = await response.text()
   assert.match(html, /dsh-nodes/)
-  assert.match(html, /v1\/admin\/pending/)
+  assert.match(html, /data-api="\/dsh-nodes\/v1\/admin"/)
+  assert.match(html, /api\('\/pending'\)/)
   assert.match(html, /localStorage/)
 })
