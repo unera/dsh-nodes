@@ -198,3 +198,13 @@ test('без токена — 401, с плохим токеном — 401', asyn
   const bad = await fetch(`${base}/v1/commands?after=0`, { headers: { authorization: 'Bearer nope' } })
   assert.equal(bad.status, 401)
 })
+
+test('админка отдаётся страницей, без токена', async () => {
+  const response = await fetch(`${base}/admin`)
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type'), /text\/html/)
+  const html = await response.text()
+  assert.match(html, /dsh-nodes/)
+  assert.match(html, /v1\/admin\/pending/)
+  assert.match(html, /localStorage/)
+})

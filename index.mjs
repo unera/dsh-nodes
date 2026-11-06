@@ -14,6 +14,7 @@ import { Store, newToken } from './lib/db.mjs'
 import { Queue } from './lib/queue.mjs'
 import { createNodesServer } from './lib/server.mjs'
 import { ArgsError, checkArgs } from './lib/args.mjs'
+import { createPresence } from './lib/ws.mjs'
 
 export const name = 'dsh-nodes'
 export const inject = ['tools', 'webServer']
@@ -61,7 +62,7 @@ function resolveAdminToken (config, dir) {
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {object} config
  */
-export function apply (ctx, config) {
+export async function apply (ctx, config) {
   const dir = resolveDataDir(config)
   mkdirSync(dir, { recursive: true })
   const store = new Store(join(dir, 'dsh-nodes.sqlite'))
@@ -80,7 +81,17 @@ export function apply (ctx, config) {
   }
   log('info', `состояние: ${join(dir, 'dsh-nodes.sqlite')}, epoch ${epoch}`)
 
-  const server = createNodesServer({ store, queue, config, log, adminToken })
+  // Присутствие по WebSocket. Пакет `ws` нужен только серверу; без него
+  // плагин работает, но узлы считаются живыми по последнему HTTP-обращению.
+  let presence = null
+  try {
+    const { WebSocketServer } = await import('ws')
+    presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log })
+  } catch (error) {
+    log('warn', `WebSocket недоступен (${error.message}); присутствие только по HTTP`)
+  }
+
+  const server = createNodesServer({ store, queue, config, log, adminToken, presence })
 
   const disposers = []
   const register = (route) => {
@@ -89,6 +100,10 @@ export function apply (ctx, config) {
   }
   ctx.effect(() => {
     register({ kind: 'prefix', path: config.routePrefix, handler: (req, res) => server.handle(req, res) })
+    if (presence) {
+      const disposeUpgrade = ctx.webServer.registerUpgrade({ path: presence.path, handler: presence.upgrade })
+      disposers.push(disposeUpgrade)
+    }
     return () => {
       for (const dispose of disposers.reverse()) {
         try {
@@ -101,6 +116,7 @@ export function apply (ctx, config) {
   const sweep = setInterval(() => queue.sweep(), 30_000)
   if (typeof sweep.unref === 'function') sweep.unref()
   ctx.effect(() => () => clearInterval(sweep))
+  if (presence) ctx.effect(() => () => presence.close())
 
   // ── тулы модели (план §5) ────────────────────────────────────────────────
   const sandboxFor = (session) => {
@@ -212,6 +228,7 @@ export function apply (ctx, config) {
           sandbox: sandboxFor(execution?.agent?.session),
         })
         if (seq === null) return promise
+        presence?.notify(node.id)
         execution?.signal?.addEventListener?.('abort', () => queue.cancel(node.id, seq), { once: true })
         const outcome = await promise
         return { node: node.id, api: def.id, method: args.method, ...outcome }
