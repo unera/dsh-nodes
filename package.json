@@ -1,11 +1,12 @@
 {
   "name": "@dr-co/dsh-nodes",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "DSH plugin: remote nodes announce their APIs, the model calls their methods (MCP aggregator side)",
   "type": "module",
   "main": "./index.mjs",
   "exports": {
     ".": "./index.mjs",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -16,7 +17,8 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "build:client": "node scripts/build-client.mjs"
   },
   "keywords": [
     "dsh",
@@ -35,6 +37,12 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   },
   "repository": {
