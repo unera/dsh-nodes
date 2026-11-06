@@ -11,7 +11,7 @@ import { after, before, test } from 'node:test'
 
 import { Store } from '../lib/db.mjs'
 import { Queue } from '../lib/queue.mjs'
-import { createTools, sandboxReport } from '../lib/tools.mjs'
+import { createTools, humanUptime, sandboxReport } from '../lib/tools.mjs'
 import { createNodesServer } from '../lib/server.mjs'
 import { handleAdmin } from '../lib/admin-api.mjs'
 import * as api from '../../dsh-node-client/lib/api.mjs'
@@ -624,4 +624,36 @@ test('отказ без песочницы-вопроса: сервер став
   assert.equal(retry.commands.length, 1, 'после согласия команда должна уйти повторно')
   assert.ok(retry.commands[0].approved, 'повтор помечен как подтверждённый')
   assert.equal(retry.commands[0].escalation, 1)
+})
+
+test('аптайм считается по часам сервера, а не клиента', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'uptime-node' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  await fetch(`${base}/v1/announce`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ apis: [{ name: 'bash', version: '4', methods: [{ method: 'exec', args: { type: 'object' } }] }], uptimeSeconds: 3600 }),
+  })
+  const node = store.node(nodeId)
+  assert.ok(node.boot_at, 'сервер должен запомнить момент старта')
+  const computed = Math.round((Date.now() - node.boot_at) / 1000)
+  assert.ok(computed >= 3600 && computed < 3700, `аптайм должен быть около часа, а получился ${computed}`)
+  assert.equal(humanUptime(3600 * 1000 + 720 * 1000), '1h 12m')
+  assert.equal(humanUptime(45 * 1000), '45s')
+})
+
+test('врущие часы клиента не ломают аптайм: считается только дельта', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'uptime-skew' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  // клиент говорит «я работаю 10 секунд», хотя его собственные часы уехали на годы
+  await fetch(`${base}/v1/announce`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ apis: [{ name: 'bash', version: '3', methods: [{ method: 'exec', args: { type: 'object' } }] }], uptimeSeconds: 10 }),
+  })
+  const node = store.node(nodeId)
+  const computed = Math.max(0, Math.round((Date.now() - node.boot_at) / 1000))
+  assert.ok(computed < 60, `ожидали меньше минуты, получили ${computed}`)
 })
