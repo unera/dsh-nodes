@@ -410,7 +410,7 @@ test('отказ песочницы: при выключенных апрува�
   })
   const outcome = await running
   assert.equal(outcome.code, 'sandbox_denied')
-  assert.match(outcome.message, /потолок узла — ro/)
+  assert.match(outcome.message, /Потолок узла — ro/)
 })
 
 
