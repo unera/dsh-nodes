@@ -234,25 +234,11 @@ function NodesPanel () {
     }
   }
 
-  const editingNode = editing == null ? null : nodes.find((node) => node.id === editing) ?? null
 
   return h('div', { className: 'dshn' }, [
     h('div', { key: 'msg', className: `msg ${message.kind}` },
       message.text || (epoch != null ? `epoch ${epoch}, устройств ${nodes.length}` : '')),
     secret ? h('div', { key: 'secret', className: 'secret' }, `токен (показывается один раз): ${secret}`) : null,
-
-    editingNode
-      ? h(NodeEditor, {
-        key: `editor-${editingNode.id}`,
-        node: editingNode,
-        busy,
-        onCancel: () => setEditing(null),
-        onSave: async (id, body) => {
-          const ok = await run({ op: 'update', id, body }, 'сохранено')
-          if (ok) setEditing(null)
-        },
-      })
-      : null,
 
     h('section', { key: 'pair' }, [
       h('h3', { key: 'h' }, 'Подключить клиента'),
@@ -308,22 +294,38 @@ function NodesPanel () {
             h('th', { key: 'i' }, 'id'), h('th', { key: 'n' }, 'имя / алиасы'),
             h('th', { key: 'a' }, 'API'), h('th', { key: 'd' }, 'доступ'), h('th', { key: 'x' }, ''),
           ])),
-          h('tbody', { key: 'body' }, nodes.map((node) => h(NodeRow, {
-            key: node.id,
-            node,
-            busy,
-            onEdit: (id) => setEditing((current) => (current === id ? null : id)),
+          h('tbody', { key: 'body' }, nodes.flatMap((node) => {
+            const row = h(NodeRow, {
+              key: `row-${node.id}`,
+              node,
+              busy,
+              onEdit: (id) => setEditing((current) => (current === id ? null : id)),
             onRevoke: (id) => {
               if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
               setSecret(null)
               run({ op: 'token', id }, 'токен перевыпущен')
             },
-            onDelete: (id) => {
-              if (typeof window !== 'undefined' && !window.confirm(`Удалить узел ${id}?`)) return
-              if (editing === id) setEditing(null)
-              run({ op: 'delete', id }, 'удалён')
-            },
-          }))),
+              onDelete: (id) => {
+                if (typeof window !== 'undefined' && !window.confirm(`Удалить узел ${id}?`)) return
+                if (editing === id) setEditing(null)
+                run({ op: 'delete', id }, 'удалён')
+              },
+            })
+            // форма живёт прямо над своей строкой: не нужно листать к верху панели
+            if (editing !== node.id) return [row]
+            return [
+              h('tr', { key: `editor-${node.id}` }, h('td', { colSpan: 5, style: { padding: '4px 8px 12px' } }, h(NodeEditor, {
+                node,
+                busy,
+                onCancel: () => setEditing(null),
+                onSave: async (id, body) => {
+                  const ok = await run({ op: 'update', id, body }, 'сохранено')
+                  if (ok) setEditing(null)
+                },
+              }))),
+              row,
+            ]
+          })),
         ]),
     ]),
 
