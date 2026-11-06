@@ -405,7 +405,7 @@ test('отказ песочницы: при выключенных апрува�
     headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       ok: true,
-      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'ro', denied: true, signature: 'read-only file system' } }) }],
+      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'ro', denied: true, failed: true, signature: 'read-only file system' } }) }],
     }),
   })
   const outcome = await running
@@ -441,7 +441,7 @@ test('отказ песочницы: апрувы выключены — отк�
     headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       ok: true,
-      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'ro', denied: true, signature: 'read-only file system' } }) }],
+      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'ro', denied: true, failed: true, signature: 'read-only file system' } }) }],
     }),
   })
   const outcome = await running
