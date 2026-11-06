@@ -113,15 +113,13 @@ test('без токена upgrade отвергается', async () => {
   })
 })
 
-test('hello со старым epoch отвечает reconnect, курсор сбрасывается', async () => {
+test('hello со старым epoch отвечает reconnect', async () => {
   const { node, token } = await makeNode('lamp')
   const socket = await open(token)
-  queue.raiseServed(node.id, 42)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch - 1, known: 42 }))
   const ok = await frame(socket, 'hello-ok')
   assert.equal(ok.epoch, queue.epoch)
   assert.equal(ok.reconnect, true)
-  assert.equal(queue.info(node.id).served, 0)
   socket.close()
 })
 

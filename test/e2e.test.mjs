@@ -702,3 +702,38 @@ test('исход повтора после подтверждения тоже �
   assert.deepEqual(kinds, ['denied', 'approve', 'exec'], `ожидали отказ, разрешение и исполнение, а получили ${kinds}`)
   assert.ok(store.readAudit(50).length > before)
 })
+
+test('approver=local без session.approve не принимается: узел честно становится none', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'liar-node' }) })
+  const nodeId = created.body.node.id
+  await fetch(`${base}/v1/announce`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      apis: [{ name: 'bash', version: '1', methods: [{ method: 'exec', args: { type: 'object' } }] }],
+      approver: 'local',
+      allowEscalation: true,
+    }),
+  })
+  const node = store.node(nodeId)
+  assert.equal(node.approver, 'none', 'обещание без метода не принимаем')
+  assert.equal(node.allow_escalation, 0)
+})
+
+test('approver=local с session.approve принимается', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'honest-node' }) })
+  const nodeId = created.body.node.id
+  await fetch(`${base}/v1/announce`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      apis: [
+        { name: 'bash', version: '1', methods: [{ method: 'exec', args: { type: 'object' } }] },
+        { name: 'session', version: '3', methods: [{ method: 'approve', args: { type: 'object' } }] },
+      ],
+      approver: 'local',
+      allowEscalation: true,
+    }),
+  })
+  assert.equal(store.node(nodeId).approver, 'local')
+})
