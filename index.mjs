@@ -151,10 +151,16 @@ export function apply (ctx, config) {
   const sandboxFor = (session) => {
     try {
       const policy = ctx.sandboxPolicy?.resolve?.({ session })
-      if (!policy?.mode) return undefined
+      if (!policy?.mode) {
+        // не смогли узнать режим — работаем по самому узкому, а не без песочницы:
+        // «неизвестно» не должно означать «полный доступ»
+        console.warn('[dsh-nodes] sandboxPolicy без режима: считаю read-only')
+        return { mode: 'read-only' }
+      }
       return { mode: policy.mode, ...(policy.workspaceRoot ? { root: policy.workspaceRoot } : {}) }
-    } catch {
-      return undefined
+    } catch (error) {
+      console.warn(`[dsh-nodes] sandboxPolicy не разрешился (${error.message}): считаю read-only`)
+      return { mode: 'read-only' }
     }
   }
 
