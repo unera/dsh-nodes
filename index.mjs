@@ -67,11 +67,20 @@ function resolveAdminToken (config, dir) {
  * @param {object} config
  */
 export async function apply (ctx, config) {
+  // Сначала — маршруты админки, и строго до первого await: cordis привязывает
+  // регистрацию к текущему волокну, а после await оно уже не то, и маршруты
+  // молча не появляются (панель получает 404). Сервис `connection` приходит
+  // позже плагина, поэтому ждём его явно.
+  let store = null
+  let queue = null
+  let presence = null
+  mountAdminRoutes({ ctx, config, getDeps: () => ({ store, queue, config, prefix: config.routePrefix, presence }) })
+
   const dir = resolveDataDir(config)
   mkdirSync(dir, { recursive: true })
-  const store = new Store(join(dir, 'dsh-nodes.sqlite'))
+  store = new Store(join(dir, 'dsh-nodes.sqlite'))
   const epoch = store.bumpEpoch()
-  const queue = new Queue({
+  queue = new Queue({
     epoch,
     defaultTimeout: config.defaultTimeout,
     maxBatch: config.maxBatch,
@@ -97,7 +106,6 @@ export async function apply (ctx, config) {
 
   // Присутствие по WebSocket. Пакет `ws` нужен только серверу; без него
   // плагин работает, но узлы считаются живыми по последнему HTTP-обращению.
-  let presence = null
   try {
     const { WebSocketServer } = await import('ws')
     presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log })
@@ -126,84 +134,6 @@ export async function apply (ctx, config) {
       }
     }
   })
-
-  // Админка живёт только за owner-гейтом ядра: страница и её API — под /api.
-  // Публичный префикс остаётся для узлов и заявок, ничего админского там нет.
-  //
-  // Регистрация обязана идти внутри `ctx.effect`: cordis привязывает владение
-  // маршрутом к волокну, и `register` вне эффекта просто не доходит до дела.
-  // Тогда панель получает 404 и выглядит как «маршрутов нет».
-  const warn = (message, extra) => {
-    // ctx.logger в этом профиле молчит, поэтому диагностика — в консоль,
-    // как у остальных наших плагинов
-    // eslint-disable-next-line no-console
-    console.warn(`[dsh-nodes] ${message}${extra === undefined ? '' : ' ' + JSON.stringify(extra)}`)
-  }
-
-  if (typeof ctx.inject === 'function') {
-    ctx.inject(['connection'], (connCtx) => {
-      const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
-      if (connection === null || typeof connection.fetch?.register !== 'function') {
-        warn('connection без fetch.register(): админка не отдаётся')
-        return
-      }
-      const mount = () => {
-        const originOf = (request) => config.publicUrl?.replace(/\/$/, '') ?? `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
-        const deps = { store, queue, config, prefix: config.routePrefix, presence }
-        const json = (status, body) => new Response(JSON.stringify(body), {
-          status,
-          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-        })
-        const route = (path, methods, run) => connection.fetch.register({
-          path,
-          methods,
-          requestBody: 'buffered',
-          fetch: async (request) => {
-            try {
-              const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
-              const result = await run(body, request)
-              return json(result.status, result.body)
-            } catch (error) {
-              return json(500, { code: 'internal', message: String(error?.message ?? error) })
-            }
-          },
-        })
-        const disposers = [
-          connection.fetch.register({
-            path: '/api/dsh-nodes/admin',
-            methods: ['GET'],
-            requestBody: 'buffered',
-            fetch: async () => new Response(renderAdmin(), {
-              status: 200,
-              headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-            }),
-          }),
-          route('/api/dsh-nodes/nodes', ['GET'], () => handleAdmin(deps, 'GET', '/nodes', {})),
-          route('/api/dsh-nodes/catalog', ['GET'], () => handleAdmin(deps, 'GET', '/catalog', {})),
-          route('/api/dsh-nodes/pending', ['GET'], () => handleAdmin(deps, 'GET', '/pending', {})),
-          route('/api/dsh-nodes/admin', ['POST'], (body, request) => handleAdminOp({ ...deps, origin: originOf(request) }, body)),
-        ]
-        // eslint-disable-next-line no-console
-        console.log(`[dsh-nodes] админ-маршрутов зарегистрировано: ${disposers.length}`)
-        return disposers
-      }
-
-      if (typeof connCtx?.effect !== 'function') {
-        warn('нет connCtx.effect(): маршруты зарегистрировать негде')
-        return
-      }
-      connCtx.effect(() => {
-        const disposers = mount()
-        return () => {
-          for (const dispose of disposers) {
-            try {
-              dispose?.()
-            } catch {}
-          }
-        }
-      })
-    })
-  }
 
   const sweep = setInterval(() => queue.sweep(), 30_000)
   if (typeof sweep.unref === 'function') sweep.unref()
@@ -261,4 +191,81 @@ export async function apply (ctx, config) {
 
 
 
+
+
+
+/**
+ * Зарегистрировать owner-гейтовые маршруты админки.
+ *
+ * `connection.fetch.register` обязан вызываться внутри `ctx.effect`: cordis
+ * привязывает владение маршрутом к волокну, а регистрация вне эффекта не
+ * доходит до дела. И вызывать это надо синхронно из `apply`, до первого
+ * `await`, иначе волокно уже другое.
+ */
+function mountAdminRoutes ({ ctx, config, getDeps }) {
+  if (typeof ctx?.inject !== 'function') return
+  ctx.inject(['connection'], (connCtx) => {
+    const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
+    if (connection === null || typeof connection.fetch?.register !== 'function') {
+      console.warn('[dsh-nodes] connection без fetch.register(): админка не отдаётся')
+      return
+    }
+    if (typeof connCtx?.effect !== 'function') {
+      console.warn('[dsh-nodes] нет connCtx.effect(): маршруты зарегистрировать негде')
+      return
+    }
+    connCtx.effect(() => {
+      const json = (status, body) => new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+      })
+      const depsOf = (request) => {
+        const deps = getDeps()
+        if (!deps.store) return null
+        const origin = deps.config.publicUrl?.replace(/\/$/, '') ??
+          `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
+        return { ...deps, origin }
+      }
+      const route = (path, methods, run) => connection.fetch.register({
+        path,
+        methods,
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          try {
+            const deps = depsOf(request)
+            if (!deps) return json(503, { code: 'starting', message: 'плагин ещё поднимается' })
+            const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
+            const result = await run(deps, body)
+            return json(result.status, result.body)
+          } catch (error) {
+            return json(500, { code: 'internal', message: String(error?.message ?? error) })
+          }
+        },
+      })
+      const disposers = [
+        connection.fetch.register({
+          path: '/api/dsh-nodes/admin',
+          methods: ['GET'],
+          requestBody: 'buffered',
+          fetch: async () => new Response(renderAdmin(), {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+          }),
+        }),
+        route('/api/dsh-nodes/nodes', ['GET'], (deps) => handleAdmin(deps, 'GET', '/nodes', {})),
+        route('/api/dsh-nodes/catalog', ['GET'], (deps) => handleAdmin(deps, 'GET', '/catalog', {})),
+        route('/api/dsh-nodes/pending', ['GET'], (deps) => handleAdmin(deps, 'GET', '/pending', {})),
+        route('/api/dsh-nodes/admin', ['POST'], (deps, body) => handleAdminOp(deps, body)),
+      ]
+      console.log(`[dsh-nodes] админ-маршрутов зарегистрировано: ${disposers.length}`)
+      return () => {
+        for (const dispose of disposers) {
+          try {
+            dispose?.()
+          } catch {}
+        }
+      }
+    })
+  })
+}
 
