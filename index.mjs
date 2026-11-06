@@ -25,7 +25,10 @@ import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 import { createTools } from './lib/tools.mjs'
 
 export const name = 'dsh-nodes'
-export const inject = ['tools', 'webServer']
+// cordis: к `ctx.<service>` можно обращаться только если сервис объявлен в
+// inject — иначе `Error: cannot get property "connection" without inject`.
+// `connection` необязателен: без него плагин жив, просто без админки.
+export const inject = { required: ['systemPrompt', 'tools', 'webServer'], optional: ['connection'] }
 
 /** Конфиг плагина (план §10). */
 export const Config = z.object({
@@ -271,7 +274,7 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
     console.log(`[dsh-nodes] админ-маршрутов зарегистрировано: ${count}`)
   }
 
-  const direct = ctx?.connection ?? (typeof ctx?.get === 'function' ? ctx.get('connection') : null)
+  const direct = ctx?.connection ?? null
   if (direct && typeof direct?.fetch?.register === 'function') {
     mount(direct)
     return
