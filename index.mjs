@@ -7,8 +7,12 @@
  * @module @dr-co/dsh-nodes
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
+
+// CommonJS-зависимость тянем синхронно: `apply` обязан быть синхронным
+const require = createRequire(import.meta.url)
 
 import { Store, newToken } from './lib/db.mjs'
 import { Queue } from './lib/queue.mjs'
@@ -66,11 +70,12 @@ function resolveAdminToken (config, dir) {
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {object} config
  */
-export async function apply (ctx, config) {
+export function apply (ctx, config) {
   // Сначала — маршруты админки, и строго до первого await: cordis привязывает
   // регистрацию к текущему волокну, а после await оно уже не то, и маршруты
   // молча не появляются (панель получает 404). Сервис `connection` приходит
   // позже плагина, поэтому ждём его явно.
+  console.log('[dsh-nodes] apply: старт, typeof ctx.inject =', typeof ctx?.inject, ', typeof ctx.effect =', typeof ctx?.effect)
   let store = null
   let queue = null
   let presence = null
@@ -107,7 +112,9 @@ export async function apply (ctx, config) {
   // Присутствие по WebSocket. Пакет `ws` нужен только серверу; без него
   // плагин работает, но узлы считаются живыми по последнему HTTP-обращению.
   try {
-    const { WebSocketServer } = await import('ws')
+    // `ws` — CommonJS, и берём его синхронно: `apply` не должен быть async,
+    // иначе cordis уводит выполнение в чужое волокно и регистрации не видно.
+    const { WebSocketServer } = require('ws')
     presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log })
   } catch (error) {
     log('warn', `WebSocket недоступен (${error.message}); присутствие только по HTTP`)
@@ -203,8 +210,13 @@ export async function apply (ctx, config) {
  * `await`, иначе волокно уже другое.
  */
 function mountAdminRoutes ({ ctx, config, getDeps }) {
-  if (typeof ctx?.inject !== 'function') return
+  if (typeof ctx?.inject !== 'function') {
+    console.log('[dsh-nodes] mountAdminRoutes: у контекста нет inject')
+    return
+  }
+  console.log('[dsh-nodes] mountAdminRoutes: ждём connection')
   ctx.inject(['connection'], (connCtx) => {
+    console.log('[dsh-nodes] mountAdminRoutes: connection пришёл, typeof effect =', typeof connCtx?.effect)
     const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
     if (connection === null || typeof connection.fetch?.register !== 'function') {
       console.warn('[dsh-nodes] connection без fetch.register(): админка не отдаётся')
