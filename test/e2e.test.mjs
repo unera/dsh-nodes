@@ -449,3 +449,18 @@ test('отказ песочницы: апрувы выключены — отк�
   assert.match(outcome.message, /запрещены владельцем/)
   assert.equal(asked, 0, 'при выключенных апрувах человека не спрашивают')
 })
+
+test('рендер ошибки показывает код возврата и stderr', () => {
+  const tool = createTools({ store, queue, config: CONFIG, epoch: queue.epoch, sandboxFor: () => null })
+    .find((entry) => entry.name === 'nodes_call')
+  const rendered = tool.output.render({}, {
+    status: 'error',
+    code: 'sandbox_denied',
+    message: 'узел 5: отказ песочницы',
+    results: [{ type: 'text', text: '[stderr] bash: /x: Read-only file system' }, { type: 'text', text: '{"code":1}' }],
+  })
+  const text = rendered.map((block) => block.text).join('\n')
+  assert.match(text, /sandbox_denied/)
+  assert.match(text, /Read-only file system/)
+  assert.match(text, /"code":1/)
+})
