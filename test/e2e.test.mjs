@@ -139,8 +139,12 @@ test('поздний результат — 409, чужой номер — 404',
   assert.equal(late.status, 409)
   assert.equal(late.body.late, true)
 
-  const unknown = await api.result(base, token, seq + 100, { ok: true, results: [] })
-  assert.equal(unknown.status, 404)
+  // чужой (несуществующий) номер — это ошибка, а не «уже закрыта»: проглотить
+  // её значит молча потерять результат и всё равно сдвинуть курсор
+  await assert.rejects(
+    () => api.result(base, token, seq + 100, { ok: true, results: [] }),
+    /нет команды|404/,
+  )
 })
 
 test('таймаут снимает команду и отдаёт timeout ожидающему', async () => {
@@ -344,4 +348,26 @@ test('в кадре команды едет идентификатор сесс�
   queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {}, session: 'session-abc' })
   const taken = queue.take(node.id, { after: 0 })
   assert.equal(taken.commands[0].session, 'session-abc')
+})
+
+test('токен по заявке получает только тот, кто знает nonce', async () => {
+  const uuid = 'deadbeef-1111-2222-3333-444455556666'
+  const nonce = 'client-secret-1'
+  await fetch(`${base}/v1/enroll`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uuid, name: 'nonce-node', proto: 1, nonce }),
+  })
+  const approved = await admin(`/pending/${uuid}/approve`, { method: 'POST', body: '{}' })
+  assert.equal(approved.status, 200)
+
+  // чужой без nonce токен не получает
+  const stolen = await fetch(`${base}/v1/enroll/${uuid}`)
+  assert.equal(stolen.status, 403, 'без nonce токен отдавать нельзя')
+
+  // а со своим — получает
+  const own = await fetch(`${base}/v1/enroll/${uuid}?nonce=${encodeURIComponent(nonce)}`)
+  assert.equal(own.status, 200)
+  const body = await own.json()
+  assert.ok(body.token)
 })

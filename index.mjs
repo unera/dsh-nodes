@@ -51,22 +51,6 @@ function resolveDataDir (config) {
   return config.dataDir ?? join(home, 'storages')
 }
 
-/** Админ-токен: из конфига, иначе из файла, иначе новый в файл с 0600. */
-function resolveAdminToken (config, dir) {
-  if (config.adminToken) return config.adminToken
-  const file = config.adminTokenFile ?? join(dir, 'dsh-nodes-admin.token')
-  if (existsSync(file)) {
-    const value = readFileSync(file, 'utf8').trim()
-    if (value) return value
-  }
-  const token = newToken()
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, token + '\n', { mode: 0o600 })
-  try {
-    chmodSync(file, 0o600)
-  } catch {}
-  return token
-}
 
 /**
  * Плагин.
@@ -95,7 +79,6 @@ export function apply (ctx, config) {
     maxQueue: config.maxQueuePerNode,
     commandTtl: config.commandTtl,
   })
-  const adminToken = resolveAdminToken(config, dir)
   // cordis: `ctx.logger(name)` — фабрика именованного логгера, не объект с уровнями
   let logger = null
   try {
@@ -123,7 +106,7 @@ export function apply (ctx, config) {
     log('warn', `WebSocket недоступен (${error.message}); присутствие только по HTTP`)
   }
 
-  const server = createNodesServer({ store, queue, config, log, adminToken, presence })
+  const server = createNodesServer({ store, queue, config, log, presence })
 
   const disposers = []
   const register = (route) => {

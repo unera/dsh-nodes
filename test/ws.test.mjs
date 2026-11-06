@@ -171,3 +171,21 @@ test('присутствие считается онлайн для /v1/admin/no
   assert.equal(node.online, true)
   socket.close()
 })
+
+test('отзыв токена рвёт открытую сессию', async () => {
+  const { node, token } = await makeNode('revoke-ws')
+  const socket = new WebSocket(wsBase, [token])
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve)
+    socket.once('error', reject)
+  })
+  socket.send(JSON.stringify({ t: 'hello', epoch: null, known: null, proto: 1 }))
+  for (let i = 0; i < 40 && !presence.online(node.id); i++) await new Promise((r) => setTimeout(r, 25))
+  assert.equal(presence.online(node.id), true)
+
+  const closed = new Promise((resolve) => socket.once('close', (code) => resolve(code)))
+  await admin(`/nodes/${node.id}/token`, { method: 'POST', body: '' })
+  const code = await closed
+  assert.equal(code, 4401, 'сессия должна закрыться с кодом «токен отозван»')
+  assert.equal(presence.online(node.id), false)
+})
