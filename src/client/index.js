@@ -126,7 +126,7 @@ function GlyphButton ({ kind, title, onClick, disabled, className }) {
 }
 
 /** Форма правки узла: имя и алиасы. Открывается над списком. */
-function NodeEditor ({ node, busy, onSave, onCancel }) {
+function NodeEditor ({ node, busy, error, onSave, onCancel }) {
   const outside = () => node.aliases.filter((alias) => alias.toLowerCase() !== node.name.toLowerCase())
   const [name, setName] = useState(node.name)
   const [aliases, setAliases] = useState(outside().join(', '))
@@ -161,6 +161,9 @@ function NodeEditor ({ node, busy, onSave, onCancel }) {
         onChange: (event) => setAliases(event.target.value),
       }),
     ]),
+    error
+      ? h('div', { key: 'error', className: 'msg bad', style: { minHeight: 0 } }, error)
+      : null,
     h('div', { key: 'actions', className: 'row' }, [
       h('button', { key: 'save', className: 'primary', disabled: busy || !name.trim(), onClick: submit }, 'сохранить'),
       h('button', { key: 'cancel', disabled: busy, onClick: onCancel }, 'отмена'),
@@ -208,6 +211,7 @@ function NodesPanel () {
   // одна открытая форма на всю панель: открытие другой закрывает прежнюю
   const [editing, setEditing] = useState(null)
   const [tip, setTip] = useState(null)
+  const [editorError, setEditorError] = useState('')
 
   const say = (text, kind = '') => setMessage({ text, kind })
 
@@ -236,10 +240,10 @@ function NodesPanel () {
       if (result?.token) setSecret(result.token)
       if (result?.rejected?.length) say(`заняты другими узлами: ${result.rejected.join(', ')}`, 'bad')
       await load()
-      return true
+      return { ok: true }
     } catch (error) {
       say(error.message, 'bad')
-      return false
+      return { ok: false, error: error.message }
     } finally {
       setBusy(false)
     }
@@ -337,7 +341,10 @@ function NodesPanel () {
               key: `row-${node.id}`,
               node,
               busy,
-              onEdit: (id) => setEditing((current) => (current === id ? null : id)),
+              onEdit: (id) => {
+              setEditorError('')
+              setEditing((current) => (current === id ? null : id))
+            },
             onRevoke: (id) => {
               if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
               setSecret(null)
@@ -355,10 +362,20 @@ function NodesPanel () {
               h('tr', { key: `editor-${node.id}` }, h('td', { colSpan: 5, style: { padding: '4px 8px 12px' } }, h(NodeEditor, {
                 node,
                 busy,
-                onCancel: () => setEditing(null),
+                error: editorError,
+                onCancel: () => { setEditorError(''); setEditing(null) },
                 onSave: async (id, body) => {
-                  const ok = await run({ op: 'update', id, body }, 'сохранено')
-                  if (ok) setEditing(null)
+                  // имя, занятое другим узлом, ловим до запроса: сервер ответил бы
+                  // тем же, но человеку нужен ответ сразу и рядом с кнопкой
+                  const taken = nodes.find((other) => other.id !== id &&
+                    other.aliases.some((alias) => alias.toLowerCase() === String(body.name).toLowerCase()))
+                  if (taken) {
+                    setEditorError(`Имя «${body.name}» уже занято узлом ${taken.id} (${taken.name})`)
+                    return
+                  }
+                  const result = await run({ op: 'update', id, body }, 'сохранено')
+                  if (result.ok) { setEditorError(''); setEditing(null) }
+                  else setEditorError(result.error)
                 },
               }))),
               row,
