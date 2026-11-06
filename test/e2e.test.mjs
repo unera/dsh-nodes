@@ -537,3 +537,91 @@ test('аргумент sandbox переводится в словарь DSH: ro 
     await running
   }
 })
+
+test('взятая команда не выдаётся второй раз, курсор идёт по пачке', () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 50 })
+  const nodeId = 4242
+  for (let i = 0; i < 3; i++) queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i } })
+
+  const first = queue.take(nodeId, { limit: 2 })
+  assert.equal(first.commands.length, 2)
+  assert.equal(first.cursor, first.commands[1].seq, 'курсор — максимум пачки')
+  assert.equal(first.ready, 1, 'третья команда осталась ждать')
+
+  const second = queue.take(nodeId, { limit: 5 })
+  assert.equal(second.commands.length, 1, 'первая пачка повторно не выдаётся')
+  assert.equal(second.cursor, second.commands[0].seq)
+
+  const third = queue.take(nodeId, { limit: 5 })
+  assert.equal(third.commands.length, 0)
+  assert.equal(third.cursor, second.cursor, 'без готовых курсор не двигается')
+})
+
+test('взятая команда без ответа закрывается как lost, а не висит вечно', async () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 1, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
+  const nodeId = 555
+  const { promise } = queue.enqueue({ nodeId, api: 1, method: 'exec', args: {} })
+  queue.take(nodeId, { limit: 1 })
+  // ничего не отвечаем: имитируем умерший узел
+  queue.sweep(Date.now() + 60_000)
+  const outcome = await promise
+  assert.equal(outcome.code, 'lost')
+  assert.match(outcome.message, /не ответил/)
+})
+
+test('отказ без песочницы-вопроса: сервер ставит session.approve и ждёт ответа узла', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'local-approve' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  // узлу нужны оба API: bash для команды и session для апрува
+  const announced = store.announce(nodeId, [
+    { name: 'bash', version: '5', methods: [{ method: 'exec', args: { type: 'object' } }] },
+    { name: 'session', version: '3', methods: [{ method: 'approve', args: { type: 'object' } }] },
+  ])
+  const bashApi = announced.apis[0]
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access' })
+
+  const tools = createTools({
+    store,
+    queue,
+    config: { ...CONFIG, approvalTtlSeconds: 600 },
+    epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'workspace-write' }),
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+
+  const running = call.execute({ node: nodeId, api: bashApi, method: 'exec', data: { command: 'touch /etc/x' } }, {})
+  let taken = { commands: [] }
+  for (let i = 0; i < 50 && !taken.commands.length; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    taken = queue.take(nodeId, { limit: 5 })
+  }
+  const first = taken.commands[0]
+  await fetch(`${base}/v1/commands/${first.seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'rw', denied: true, failed: true, signature: 'read-only file system' } }) }] }),
+  })
+  const outcome = await running
+  assert.equal(outcome.code, 'sandbox_denied')
+  assert.match(outcome.message, /ждёт подтверждения/)
+
+  // сервер должен был поставить команду session.approve
+  const approve = queue.take(nodeId, { limit: 5 })
+  assert.equal(approve.commands.length, 1, 'апрув должен уйти на узел')
+  assert.equal(approve.commands[0].method, 'approve')
+  const payload = JSON.parse(approve.commands[0].args.text ? '{}' : '{}')
+  void payload
+
+  // человек разрешает — сервер ставит ту же команду с approved
+  await fetch(`${base}/v1/commands/${approve.commands[0].seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, code: 'approved', results: [{ type: 'text', text: JSON.stringify({ approved: true }) }] }),
+  })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const retry = queue.take(nodeId, { limit: 5 })
+  assert.equal(retry.commands.length, 1, 'после согласия команда должна уйти повторно')
+  assert.ok(retry.commands[0].approved, 'повтор помечен как подтверждённый')
+  assert.equal(retry.commands[0].escalation, 1)
+})
