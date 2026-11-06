@@ -243,7 +243,7 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
       { path: '/api/dsh-nodes/nodes', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/nodes', {}) },
       { path: '/api/dsh-nodes/catalog', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/catalog', {}) },
       { path: '/api/dsh-nodes/pending', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/pending', {}) },
-      { path: '/api/dsh-nodes/admin', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
+      { path: '/api/dsh-nodes/op', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
     ]
 
     let count = 0

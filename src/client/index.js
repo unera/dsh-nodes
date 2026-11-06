@@ -32,7 +32,7 @@ async function request (path, options = {}) {
   return parsed
 }
 
-const op = (payload) => request('/admin', { method: 'POST', body: JSON.stringify(payload) })
+const op = (payload) => request('/op', { method: 'POST', body: JSON.stringify(payload) })
 
 const STYLE_ID = 'dsh-nodes-styles'
 const CSS = `
