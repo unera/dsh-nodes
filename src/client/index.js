@@ -20,7 +20,14 @@ async function request (path, options = {}) {
     ...options,
   })
   const text = await response.text()
-  const parsed = text ? JSON.parse(text) : null
+  const type = response.headers.get('content-type') ?? ''
+  let parsed = null
+  if (text && type.includes('json')) {
+    parsed = JSON.parse(text)
+  } else if (text) {
+    // HTML фолбэка или текст ошибки: показываем начало, а не «JSON.parse: …»
+    throw new Error(`${response.status}: ${text.replace(/\s+/g, ' ').slice(0, 120)}`)
+  }
   if (!response.ok) throw new Error(parsed?.message ?? `${response.status}`)
   return parsed
 }

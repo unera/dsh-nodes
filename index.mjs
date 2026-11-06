@@ -131,15 +131,18 @@ export async function apply (ctx, config) {
   // Публичный префикс остаётся для узлов и заявок, ничего админского там нет.
   if (typeof ctx.inject === 'function') {
     try {
+      log('info', 'ждём сервис connection для админ-маршрутов')
       ctx.inject(['connection'], (connCtx) => {
         const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
         if (!connection || typeof connection.fetch?.register !== 'function') {
           log('warn', 'connection без fetch.register(): админка недоступна')
           return
         }
+        log('info', 'connection получен, регистрирую админ-маршруты')
         // origin для pairing-ссылки берём из запроса: страница за прокси
         const originOf = (request) => config.publicUrl?.replace(/\/$/, '') ?? `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
         const deps = { store, queue, config, prefix: config.routePrefix, presence }
+        log('info', 'админка: регистрация начата', { prefix: config.routePrefix })
         const routes = []
         // порядок важен: точные пути раньше общего
         routes.push(connection.fetch.register({
@@ -179,6 +182,7 @@ export async function apply (ctx, config) {
             return Response.json(result.body, { status: result.status })
           },
         }))
+        log('info', 'админ-маршрутов зарегистрировано', { count: routes.length })
         if (typeof connCtx?.effect === 'function') connCtx.effect(() => () => { for (const dispose of routes) try { dispose?.() } catch {} })
         else disposers.push(...routes)
       })
