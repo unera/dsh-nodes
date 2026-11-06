@@ -464,3 +464,51 @@ test('рендер ошибки показывает код возврата и 
   assert.match(text, /Read-only file system/)
   assert.match(text, /"code":1/)
 })
+
+test('отказ песочницы: согласие человека превращается в повтор с широким режимом', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'ask-on' }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [{ name: 'bash', version: '7', methods: [{ method: 'exec', args: { type: 'object' } }] }])
+  const apiId = announced.apis[0]
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access' })
+  const asked = []
+  const tools = createTools({
+    store,
+    queue,
+    config: CONFIG,
+    epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'workspace-write', root: '/tmp' }),
+    approval: { request: async (request) => { asked.push(request); return 'approved' } },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const running = call.execute({ node: nodeId, api: apiId, method: 'exec', data: { command: 'touch /etc/x' } }, { agent: {}, name: 'nodes_call' })
+  let taken = { commands: [] }
+  for (let i = 0; i < 50 && !taken.commands.length; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    taken = queue.take(nodeId, { after: 0 })
+  }
+  const first = taken.commands[0]
+  await fetch(`${base}/v1/commands/${first.seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ok: true,
+      results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'rw', denied: true, failed: true, signature: 'read-only file system' } }) }],
+    }),
+  })
+  // ждём повторную команду с широким режимом
+  let retry = { commands: [] }
+  for (let i = 0; i < 100 && !retry.commands.length; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    retry = queue.take(nodeId, { after: first.seq })
+  }
+  assert.equal(asked.length, 1, 'человека спросили один раз')
+  assert.equal(retry.commands[0].sandbox.mode, 'full', 'повтор идёт с полным доступом')
+  await fetch(`${base}/v1/commands/${retry.commands[0].seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, results: [{ type: 'text', text: 'готово' }] }),
+  })
+  const outcome = await running
+  assert.equal(outcome.status, 'ok')
+})
