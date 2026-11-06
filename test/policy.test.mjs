@@ -43,16 +43,23 @@ test('все сервисы, к которым обращаемся напрям
     .split('\n')
     .filter((line) => !line.trim().startsWith('//'))
     .join('\n')
+
   const declared = /export const inject = \{([^}]*)\}/.exec(source)?.[1] ?? ''
   const names = [...declared.matchAll(/(\w+)\s*:/g)].map((match) => match[1])
   assert.ok(names.length > 0, 'inject должен быть картой сервисов')
 
-  // прямое обращение вида ctx.<service> требует объявления; ctx.get — нет
+  // прямое обращение вида `ctx.<service>` требует объявления в inject.
+  // `ctx.get('...')` — не требует, поэтому такие обращения сюда не попадают.
   const used = new Set([...source.matchAll(/ctx\.(\w+)/g)].map((match) => match[1]))
-  const allowed = new Set(['get', 'effect', 'logger', 'inject', 'tools', 'systemPrompt', 'webServer', 'connection', 'sandboxPolicy', 'plugin', 'on'])
-  for (const name of used) {
-    if (allowed.has(name) && !names.includes(name)) continue
-    if (['get', 'effect', 'logger', 'inject', 'plugin', 'on'].includes(name)) continue
-    assert.ok(names.includes(name), `ctx.${name} используется, но не объявлен в inject`)
-  }
+  const notServices = new Set(['get', 'effect', 'logger', 'plugin', 'on', 'inject', 'emit', 'set'])
+  const missing = [...used].filter((name) => !notServices.has(name) && !names.includes(name))
+  assert.deepEqual(missing, [], `используются, но не объявлены в inject: ${missing.join(', ')}`)
+
+  // обратная проверка: тест должен ловить реальную дыру, а не быть зелёным всегда
+  const broken = source.replace(", sandboxPolicy: null", "")
+  const brokenNames = [...(/export const inject = \{([^}]*)\}/.exec(broken)?.[1] ?? '').matchAll(/(\w+)\s*:/g)].map((m) => m[1])
+  assert.ok(!brokenNames.includes('sandboxPolicy'), 'подготовка: из inject убрать sandboxPolicy не удалось')
+  const brokenUsed = new Set([...broken.matchAll(/ctx\.(\w+)/g)].map((match) => match[1]))
+  const brokenMissing = [...brokenUsed].filter((name) => !notServices.has(name) && !brokenNames.includes(name))
+  assert.ok(brokenMissing.includes('sandboxPolicy'), 'тест обязан замечать необъявленный сервис')
 })

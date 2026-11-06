@@ -737,3 +737,141 @@ test('approver=local с session.approve принимается', async () => {
   })
   assert.equal(store.node(nodeId).approver, 'local')
 })
+
+test('человек отказал в DSH-апруве — команда не выполняется', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'reject-node' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  const announced = store.announce(nodeId, [
+    { name: 'bash', version: '9', methods: [{ method: 'exec', args: { type: 'object' } }] },
+  ])
+  const bashApi = announced.apis[0]
+  // локального апрувера у узла нет: спрашивать будет сервер
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access', approver: 'server' })
+
+  const asked = []
+  const tools = createTools({
+    store,
+    queue,
+    config: { ...CONFIG },
+    epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'workspace-write' }),
+    approval: { request: async (request) => { asked.push(request); return 'rejected' } },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const running = call.execute({ node: nodeId, api: bashApi, method: 'exec', data: { command: 'touch /etc/x' } }, {})
+
+  const takeOne = async () => {
+    for (let i = 0; i < 60; i++) {
+      const got = queue.take(nodeId, { limit: 5 })
+      if (got.commands.length) return got.commands[0]
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('команда не выдана')
+  }
+  const first = await takeOne()
+  await fetch(`${base}/v1/commands/${first.seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'rw', denied: true, failed: true, signature: 'read-only file system' } }) }] }),
+  })
+
+  const outcome = await running
+  assert.equal(asked.length, 1, 'человека должны были спросить')
+  assert.equal(outcome.code, 'sandbox_denied')
+  assert.match(outcome.message, /человек отказал/)
+  assert.equal(queue.take(nodeId, { limit: 5 }).commands.length, 0, 'после отказа повтор ставиться не должен')
+  const last = store.readAudit(1)[0]
+  assert.equal(last.kind, 'approve')
+  assert.equal(last.outcome, 'rejected', 'отказ человека должен быть в аудите')
+})
+
+test('человек разрешил в DSH-апруве — повтор уходит с approved наверху и ступенью', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'allow-node' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  const announced = store.announce(nodeId, [
+    { name: 'bash', version: '8', methods: [{ method: 'exec', args: { type: 'object' } }] },
+  ])
+  const bashApi = announced.apis[0]
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access', approver: 'server' })
+
+  const tools = createTools({
+    store,
+    queue,
+    config: { ...CONFIG },
+    epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'workspace-write' }),
+    approval: { request: async () => 'allowed-once' },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const running = call.execute({ node: nodeId, api: bashApi, method: 'exec', data: { command: 'touch /etc/x' } }, {})
+
+  const takeOne = async () => {
+    for (let i = 0; i < 60; i++) {
+      const got = queue.take(nodeId, { limit: 5 })
+      if (got.commands.length) return got.commands[0]
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('команда не выдана')
+  }
+  const first = await takeOne()
+  await fetch(`${base}/v1/commands/${first.seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'rw', denied: true, failed: true, signature: 'read-only file system' } }) }] }),
+  })
+
+  const retryCommand = await takeOne()
+  assert.equal(retryCommand.method, 'exec', 'повтор должен быть той же командой')
+  assert.ok(retryCommand.approved, 'approved обязан быть на верхнем уровне: клиент читает только его')
+  assert.equal(retryCommand.escalation, 1, 'ступень эскалации должна вырасти')
+
+  await fetch(`${base}/v1/commands/${retryCommand.seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 0, sandbox: { mode: 'full' } }) }] }),
+  })
+  const outcome = await running
+  assert.equal(outcome.results.length, 1)
+})
+
+test('просроченная невыданная команда получает ответ, а не тишину', async () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
+  const { promise } = queue.enqueue({ nodeId: 777, api: 1, method: 'exec', args: {} })
+  // никто не забирал: узел был offline
+  queue.sweep(Date.now() + 5_000)
+  const outcome = await promise
+  assert.equal(outcome.code, 'expired')
+  assert.equal(queue.take(777, { limit: 5 }).commands.length, 0)
+})
+
+test('команда апрува не стареет: человек может думать дольше commandTtl', () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 86400, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
+  queue.enqueue({ nodeId: 778, api: 1, method: 'approve', args: { id: 'x', text: 't' }, timeout: 86400 })
+  queue.sweep(Date.now() + 10 * 60 * 1000)
+  const got = queue.take(778, { limit: 5 })
+  assert.equal(got.commands.length, 1, 'вопрос человеку должен дождаться ответа')
+})
+
+test('maxQueue считает только невыданное: взятая команда не занимает слот', () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 2 })
+  const nodeId = 779
+  for (let i = 0; i < 2; i++) queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i } })
+  const full = queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i: 9 } })
+  assert.equal(full.seq, null, 'третья невыданная не должна влезать')
+  queue.take(nodeId, { limit: 2 })
+  const after = queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i: 10 } })
+  assert.ok(after.seq, 'после выдачи место освобождается')
+})
+
+test('close различает «уже закрыта» и «такой не было»', async () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 10 })
+  const nodeId = 780
+  const { seq, promise } = queue.enqueue({ nodeId, api: 1, method: 'exec', args: {} })
+  queue.take(nodeId, { limit: 1 })
+  assert.equal(queue.close(nodeId, seq, { ok: true, results: [] }), 'closed')
+  await promise
+  assert.equal(queue.close(nodeId, seq, { ok: true, results: [] }), 'already')
+  assert.equal(queue.close(nodeId, seq + 100, { ok: true, results: [] }), 'unknown')
+})
