@@ -12,9 +12,11 @@ import { after, before, test } from 'node:test'
 import { Store } from '../lib/db.mjs'
 import { Queue } from '../lib/queue.mjs'
 import { createNodesServer } from '../lib/server.mjs'
+import { handleAdmin } from '../lib/admin-api.mjs'
 import * as api from '../../dsh-node-client/lib/api.mjs'
 import { checkArgs } from '../lib/args.mjs'
 
+const CONFIG = { routePrefix: '/dsh-nodes', aliveTimeoutSeconds: 60, maxPendingEnroll: 50, maxBodyBytes: 65536 }
 const ADMIN = 'test-admin-token'
 let dir
 let store
@@ -44,12 +46,12 @@ after(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
+// Админка больше не живёт на публичном префиксе: операции вызываются функциями.
 async function admin (path, options = {}) {
-  const response = await fetch(base + path, {
-    ...options,
-    headers: { authorization: `Bearer ${ADMIN}`, 'content-type': 'application/json', ...options.headers },
-  })
-  return { status: response.status, body: await response.json() }
+  const method = options.method ?? 'GET'
+  const body = options.body ? JSON.parse(options.body) : {}
+  const rest = String(path).replace(/^\/v1\/admin/, '')
+  return handleAdmin({ store, queue, config: CONFIG, prefix: '/dsh-nodes', origin: 'https://example' }, method, rest, body)
 }
 
 test('узел создаётся админом и объявляет API', async () => {
@@ -73,7 +75,7 @@ test('узел создаётся админом и объявляет API', asy
 
   const nodes = await admin('/v1/admin/nodes')
   assert.equal(nodes.body.nodes.length, 1)
-  assert.deepEqual(nodes.body.nodes[0].apis, announced.body.apis.map((entry) => entry.id))
+  assert.deepEqual(nodes.body.nodes[0].apis.map((entry) => entry.id), announced.body.apis.map((entry) => entry.id))
 })
 
 test('команда едет до узла и возвращается результатом', async () => {
@@ -183,7 +185,7 @@ test('заявка на регистрацию: pending → approve → токе
 
   const approved = await admin(`/v1/admin/pending/${uuid}/approve`, { method: 'POST', body: JSON.stringify({}) })
   assert.equal(approved.status, 200)
-  assert.ok(approved.body.alias)
+  assert.ok(approved.body.node.aliases[0])
 
   const handed = await fetch(`${base}/v1/enroll/${uuid}`)
   assert.equal(handed.status, 200)
@@ -201,15 +203,19 @@ test('без токена — 401, с плохим токеном — 401', asyn
   assert.equal(bad.status, 401)
 })
 
-test('админка отдаётся страницей, без токена', async () => {
-  const response = await fetch(`${base}/admin`)
-  assert.equal(response.status, 200)
-  assert.match(response.headers.get('content-type'), /text\/html/)
-  const html = await response.text()
+test('старая ссылка на админку ведёт под авторизацию DSH', async () => {
+  const response = await fetch(`${base}/admin`, { redirect: 'manual' })
+  assert.equal(response.status, 302)
+  assert.equal(response.headers.get('location'), '/api/dsh-nodes/admin')
+})
+
+test('страница админки не несёт секретов и ходит на owner-гейт', async () => {
+  const { renderAdmin } = await import('../lib/admin.mjs')
+  const html = renderAdmin()
   assert.match(html, /dsh-nodes/)
-  assert.match(html, /data-api="\/dsh-nodes\/v1\/admin"/)
-  assert.match(html, /api\('\/pending'\)/)
-  assert.match(html, /localStorage/)
+  assert.match(html, /\/api\/dsh-nodes/)
+  assert.doesNotMatch(html, /localStorage/, 'токена в странице больше нет')
+  assert.match(html, /data-save=/, 'правка алиасов должна быть в странице')
 })
 
 test('pairing: админ выдаёт ссылку, клиент меняет код на токен, второй раз — 409', async () => {
@@ -246,4 +252,56 @@ test('pairing: истёкший код отвергается', async () => {
     body: JSON.stringify({ code: created.body.code }),
   })
   assert.equal(response.status, 410)
+})
+
+test('админ-API: список узлов с API, правка алиасов, заявки', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'lamp-test' }) })
+  assert.equal(created.status, 201)
+  const id = created.body.node.id
+  const token = created.body.token
+  const ownAlias = created.body.node.aliases[0]
+
+  // объявим API от лица узла
+  await api.announce(base, token, [{ name: 'lamp', version: '3', methods: [{ method: 'set', args: { type: 'object' } }] }])
+
+  const listed = await admin('/nodes')
+  const node = listed.body.nodes.find((entry) => entry.id === id)
+  assert.deepEqual(node.apis.map((a) => [a.name, a.version]), [['lamp', '3']])
+
+  // правка алиасов: лишний снимается, новый добавляется, имя остаётся
+  const updated = await admin(`/nodes/${id}/update`, {
+    method: 'POST',
+    body: JSON.stringify({ aliases: ['лампа', 'lamp-kitchen'] }),
+  })
+  assert.equal(updated.status, 200)
+  assert.deepEqual(
+    updated.body.node.aliases.sort(),
+    [ownAlias, 'lamp-kitchen', 'лампа'].sort(),
+    'имя узла остаётся алиасом, добавленные появляются',
+  )
+})
+
+test('админ-API: заявка approve и reject через функции', async () => {
+  const uuid = 'deadbeef-0000-1111-2222-333344445555'
+  await fetch(`${base}/v1/enroll`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uuid, name: 'sensor', proto: 1 }),
+  })
+  const pending = await admin('/pending')
+  assert.ok(pending.body.pending.some((row) => row.uuid === uuid))
+
+  const approved = await admin(`/pending/${uuid}/approve`, { method: 'POST', body: '{}' })
+  assert.equal(approved.status, 200)
+  assert.ok(approved.body.node.aliases.includes('sensor'))
+
+  const uuid2 = 'deadbeef-0000-1111-2222-666677778888'
+  await fetch(`${base}/v1/enroll`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uuid: uuid2, name: 'camera' }),
+  })
+  const rejected = await admin(`/pending/${uuid2}/reject`, { method: 'POST', body: '{}' })
+  assert.equal(rejected.status, 200)
+  assert.equal(rejected.body.status, 'rejected')
 })

@@ -16,6 +16,7 @@ import { createNodesServer } from './lib/server.mjs'
 import { ArgsError, checkArgs } from './lib/args.mjs'
 import { createPresence } from './lib/ws.mjs'
 import { renderAdmin } from './lib/admin.mjs'
+import { handleAdmin, handleAdminOp } from './lib/admin-api.mjs'
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 import { createTools } from './lib/tools.mjs'
 
@@ -126,30 +127,63 @@ export async function apply (ctx, config) {
     }
   })
 
-  // Та же страница за owner-гейтом ядра: /api/dsh-nodes/admin пускает только
-  // владельца DSH, публичный /dsh-nodes/admin — по админ-токену.
+  // Админка живёт только за owner-гейтом ядра: страница и её API — под /api.
+  // Публичный префикс остаётся для узлов и заявок, ничего админского там нет.
   if (typeof ctx.inject === 'function') {
     try {
       ctx.inject(['connection'], (connCtx) => {
         const connection = connCtx?.connection ?? connCtx?.get?.('connection') ?? null
         if (!connection || typeof connection.fetch?.register !== 'function') {
-          log('warn', 'connection без fetch.register(): owner-гейтовой копии админки не будет')
+          log('warn', 'connection без fetch.register(): админка недоступна')
           return
         }
-        const registerAdmin = () => connection.fetch.register({
+        // origin для pairing-ссылки берём из запроса: страница за прокси
+        const originOf = (request) => config.publicUrl?.replace(/\/$/, '') ?? `${request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https'}://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`
+        const deps = { store, queue, config, prefix: config.routePrefix, presence }
+        const routes = []
+        // порядок важен: точные пути раньше общего
+        routes.push(connection.fetch.register({
           path: '/api/dsh-nodes/admin',
           methods: ['GET'],
           requestBody: 'buffered',
-          fetch: async () => new Response(renderAdmin({ apiBase: `${config.routePrefix}/v1/admin` }), {
+          fetch: async () => new Response(renderAdmin(), {
             status: 200,
             headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
           }),
-        })
-        if (typeof connCtx?.effect === 'function') connCtx.effect(() => registerAdmin())
-        else disposers.push(registerAdmin())
+        }))
+        for (const [path, methods] of [
+          ['/api/dsh-nodes/nodes', ['GET']],
+          ['/api/dsh-nodes/catalog', ['GET']],
+          ['/api/dsh-nodes/pending', ['GET']],
+        ]) {
+          const rest = path.replace('/api/dsh-nodes', '')
+          routes.push(connection.fetch.register({
+            path,
+            methods,
+            requestBody: 'buffered',
+            fetch: async (request) => {
+              const result = handleAdmin(deps, request.method, rest, {})
+              return Response.json(result.body, { status: result.status })
+            },
+          }))
+        }
+        // все изменения — одной точкой: номера узлов динамические, а точный
+        // маршрут нельзя объявить шаблоном
+        routes.push(connection.fetch.register({
+          path: '/api/dsh-nodes/admin',
+          methods: ['POST'],
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            const payload = await request.json().catch(() => ({}))
+            const result = handleAdminOp({ ...deps, origin: originOf(request) }, payload)
+            return Response.json(result.body, { status: result.status })
+          },
+        }))
+        if (typeof connCtx?.effect === 'function') connCtx.effect(() => () => { for (const dispose of routes) try { dispose?.() } catch {} })
+        else disposers.push(...routes)
       })
     } catch (error) {
-      log('warn', `owner-гейтовая админка не подключилась: ${error.message}`)
+      log('warn', `админка не подключилась: ${error.message}`)
     }
   }
 

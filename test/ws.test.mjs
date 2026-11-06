@@ -13,8 +13,10 @@ import { WebSocket, WebSocketServer } from 'ws'
 import { Store } from '../lib/db.mjs'
 import { Queue } from '../lib/queue.mjs'
 import { createNodesServer } from '../lib/server.mjs'
+import { handleAdmin } from '../lib/admin-api.mjs'
 import { createPresence } from '../lib/ws.mjs'
 
+const CONFIG = { routePrefix: '/dsh-nodes', aliveTimeoutSeconds: 60, maxPendingEnroll: 50, maxBodyBytes: 65536 }
 const ADMIN = 'ws-test-admin'
 let dir
 let store
@@ -85,15 +87,19 @@ function closed (socket, ms = 2000) {
   })
 }
 
-async function makeNode (name) {
-  const response = await fetch(`${base}/v1/admin/nodes`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${ADMIN}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ name, defaultTimeout: 5 }),
-  })
-  const body = await response.json()
-  return { node: body.node, token: body.token }
+// Админка вызывается функциями: публичного админ-API больше нет.
+async function admin (path, options = {}) {
+  const method = options.method ?? 'GET'
+  const body = options.body ? JSON.parse(options.body) : {}
+  const rest = String(path).replace(/^\/v1\/admin/, '')
+  return handleAdmin({ store, queue, config: CONFIG, prefix: '/dsh-nodes', origin: 'https://example', presence }, method, rest, body)
 }
+
+async function makeNode (name) {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name, defaultTimeout: 5 }) })
+  return { node: created.body.node, token: created.body.token }
+}
+
 
 test('без токена upgrade отвергается', async () => {
   await assert.rejects(async () => {
@@ -160,9 +166,8 @@ test('присутствие считается онлайн для /v1/admin/no
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
   await frame(socket, 'hello-ok')
 
-  const response = await fetch(`${base}/v1/admin/nodes`, { headers: { authorization: `Bearer ${ADMIN}` } })
-  const body = await response.json()
-  const node = body.nodes.find((entry) => entry.aliases.includes('online-check'))
+  const listed = await admin('/nodes')
+  const node = listed.body.nodes.find((entry) => entry.aliases.includes('online-check'))
   assert.equal(node.online, true)
   socket.close()
 })
