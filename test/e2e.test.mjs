@@ -657,3 +657,48 @@ test('врущие часы клиента не ломают аптайм: сч�
   const computed = Math.max(0, Math.round((Date.now() - node.boot_at) / 1000))
   assert.ok(computed < 60, `ожидали меньше минуты, получили ${computed}`)
 })
+
+test('исход повтора после подтверждения тоже попадает в аудит', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-retry' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  const announced = store.announce(nodeId, [
+    { name: 'bash', version: '2', methods: [{ method: 'exec', args: { type: 'object' } }] },
+    { name: 'session', version: '4', methods: [{ method: 'approve', args: { type: 'object' } }] },
+  ])
+  const bashApi = announced.apis[0]
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access' })
+  const before = store.readAudit(50).length
+
+  const tools = createTools({ store, queue, config: { ...CONFIG }, epoch: queue.epoch, sandboxFor: () => ({ mode: 'workspace-write' }) })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const running = call.execute({ node: nodeId, api: bashApi, method: 'exec', data: { command: 'touch /etc/x' } }, {})
+
+  const take = async () => {
+    for (let i = 0; i < 60; i++) {
+      const got = queue.take(nodeId, { limit: 5 })
+      if (got.commands.length) return got.commands[0]
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('команда не выдана')
+  }
+  const answer = (seq, body) => fetch(`${base}/v1/commands/${seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const first = await take()
+  await answer(first.seq, { ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 1, sandbox: { mode: 'rw', denied: true, failed: true, signature: 'read-only file system' } }) }] })
+  await running
+  const approve = await take()
+  await answer(approve.seq, { ok: true, results: [{ type: 'text', text: JSON.stringify({ approved: true }) }] })
+  const retry = await take()
+  assert.ok(retry.approved, 'повтор должен быть помечен подтверждённым')
+  await answer(retry.seq, { ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 0, sandbox: { mode: 'full', denied: false } }) }] })
+  await new Promise((resolve) => setTimeout(resolve, 60))
+
+  const kinds = store.readAudit(50).slice(0, 3).map((row) => row.kind).reverse()
+  assert.deepEqual(kinds, ['denied', 'approve', 'exec'], `ожидали отказ, разрешение и исполнение, а получили ${kinds}`)
+  assert.ok(store.readAudit(50).length > before)
+})
