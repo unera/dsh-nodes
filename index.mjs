@@ -28,7 +28,9 @@ export const name = 'dsh-nodes'
 // cordis: `inject` — это карта «имя сервиса → конфиг». К `ctx.<service>` можно
 // обращаться только если сервис в ней объявлен, иначе
 // `Error: cannot get property "connection" without inject` и плагин не поднимется.
-export const inject = { systemPrompt: null, tools: null, webServer: null, connection: null }
+// Каждый сервис, к которому обращаемся напрямую, обязан быть здесь: cordis
+// бросает «cannot get property X without inject». На этом мы попадались трижды.
+export const inject = { systemPrompt: null, tools: null, webServer: null, connection: null, sandboxPolicy: null }
 
 /** Конфиг плагина (план §10). */
 export const Config = z.object({
@@ -150,14 +152,14 @@ export function apply (ctx, config) {
   // ── тулы модели (план §5) ────────────────────────────────────────────────
   const sandboxFor = (session) => {
     try {
-      const policy = ctx.sandboxPolicy?.resolve?.({ session })
+      const service = ctx.sandboxPolicy ?? (typeof ctx.get === 'function' ? ctx.get('sandboxPolicy') : null)
+      const policy = service?.resolve?.({ session })
       if (!policy?.mode) {
         // не смогли узнать режим — работаем по самому узкому, а не без песочницы:
         // «неизвестно» не должно означать «полный доступ»
         console.warn('[dsh-nodes] sandboxPolicy без режима: считаю read-only')
         return { mode: 'read-only' }
       }
-      console.log('[dsh-nodes] sandboxPolicy:', policy.mode, 'root:', policy.workspaceRoot ?? '-')
       return { mode: policy.mode, ...(policy.workspaceRoot ? { root: policy.workspaceRoot } : {}) }
     } catch (error) {
       console.warn(`[dsh-nodes] sandboxPolicy не разрешился (${error.message}): считаю read-only`)
