@@ -335,3 +335,13 @@ test('отзыв токена открывает заявку заново', asy
   // старый токен больше не пускают: клиент получает ошибку авторизации
   await assert.rejects(() => api.state(base, token), /token|unauthorized|токен/i)
 })
+
+test('в кадре команды едет идентификатор сессии', () => {
+  
+  const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 10 })
+  const node = { id: 99 }
+  queue.info(node.id)
+  queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {}, session: 'session-abc' })
+  const taken = queue.take(node.id, { after: 0 })
+  assert.equal(taken.commands[0].session, 'session-abc')
+})
