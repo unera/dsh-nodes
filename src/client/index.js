@@ -51,7 +51,7 @@ const CSS = `
 .dshn .muted { opacity: .6; }
 .dshn .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); margin-left: 6px; white-space: nowrap; }
 .dshn .on { color: #16a34a; border-color: #16a34a88; }
-.dshn .off { opacity: .55; }
+.dshn .off { color: #ef4444; border-color: #ef444488; }
 .dshn .msg { min-height: 18px; font-size: 13px; }
 .dshn .msg.bad { color: #ef4444; }
 .dshn .msg.good { color: #16a34a; }
@@ -73,6 +73,11 @@ function mountStyles () {
   element.textContent = CSS
   document.head.appendChild(element)
   return () => element.remove()
+}
+
+/** Разобрать список алиасов: запятая, точка с запятой и перевод строки равны. */
+function splitAliases (value) {
+  return String(value ?? '').split(/[,\n;]+/).map((part) => part.trim()).filter(Boolean)
 }
 
 function ago (ms) {
@@ -103,22 +108,20 @@ function Glyph ({ kind }) {
   }, h('path', { d: paths[kind] }))
 }
 
-function GlyphButton ({ kind, title, onClick, disabled, className, onTip, onTipEnd }) {
-  const show = (event) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    onTip?.({ text: title, x: rect.left + rect.width / 2, y: rect.bottom + 6 })
-  }
+/**
+ * Кнопка-глиф. Подсказку показывает контейнер по делегированным событиям:
+ * список перерисовывается каждые 5 секунд, и подсказка, привязанная к самой
+ * кнопке, гасла вместе со её пересозданием.
+ */
+function GlyphButton ({ kind, title, onClick, disabled, className }) {
   return h('button', {
     className: `glyph ${className ?? ''}`,
-    // подсказку рисуем сами и position: fixed — панель настроек обрезает всё,
-    // что выходит за её границы, поэтому absolute-подсказка там не видна
+    // position: fixed у подсказки — потому что панель настроек обрезает всё,
+    // что выходит за её границы
+    'data-tip': title,
     'aria-label': title,
     disabled: Boolean(disabled),
     onClick,
-    onMouseEnter: show,
-    onFocus: show,
-    onMouseLeave: () => onTipEnd?.(),
-    onBlur: () => onTipEnd?.(),
   }, h(Glyph, { kind }))
 }
 
@@ -133,10 +136,7 @@ function NodeEditor ({ node, busy, onSave, onCancel }) {
     setAliases(node.aliases.filter((alias) => alias.toLowerCase() !== node.name.toLowerCase()).join(', '))
   }, [node.id, node.name, node.aliases.join(',')])
 
-  const submit = () => {
-    const list = aliases.split(',').map((value) => value.trim()).filter(Boolean)
-    onSave(node.id, { name: name.trim(), aliases: list })
-  }
+  const submit = () => onSave(node.id, { name: name.trim(), aliases: splitAliases(aliases) })
 
   return h('div', { className: 'editor' }, [
     h('div', { key: 'title', className: 'row' }, [
@@ -246,7 +246,34 @@ function NodesPanel () {
   }
 
 
-  return h('div', { className: 'dshn' }, [
+  // Делегированные подсказки: наведение и фокус внутри панели, без состояния
+  // на каждой кнопке — перерисовка списка их не сбрасывает.
+  const showTipFor = (event) => {
+    const target = event.target?.closest?.('button[data-tip]')
+    if (!target) return
+    const rect = target.getBoundingClientRect()
+    setTip({ text: target.getAttribute('data-tip'), x: rect.left + rect.width / 2, y: rect.bottom + 6 })
+  }
+  const hideTipIfLeft = (event) => {
+    const target = event.target?.closest?.('button[data-tip]')
+    if (!target) return
+    if (event.relatedTarget && target.contains(event.relatedTarget)) return
+    setTip(null)
+  }
+
+  return h('div', {
+    className: 'dshn',
+    onMouseOver: showTipFor,
+    onMouseOut: hideTipIfLeft,
+    onFocusIn: (event) => {
+      const target = event.target?.closest?.('button[data-tip]')
+      if (!target) return
+      const rect = target.getBoundingClientRect()
+      setTip({ text: target.getAttribute('data-tip'), x: rect.left + rect.width / 2, y: rect.bottom + 6 })
+    },
+    onFocusOut: () => setTip(null),
+    onScroll: () => setTip(null),
+  }, [
     h('div', { key: 'msg', className: `msg ${message.kind}` },
       message.text || (epoch != null ? `epoch ${epoch}, устройств ${nodes.length}` : '')),
     secret ? h('div', { key: 'secret', className: 'secret' }, `токен (показывается один раз): ${secret}`) : null,
@@ -311,8 +338,6 @@ function NodesPanel () {
               node,
               busy,
               onEdit: (id) => setEditing((current) => (current === id ? null : id)),
-              onTip: setTip,
-              onTipEnd: () => setTip(null),
             onRevoke: (id) => {
               if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
               setSecret(null)
