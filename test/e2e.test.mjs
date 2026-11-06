@@ -64,6 +64,8 @@ test('узел создаётся админом и объявляет API', asy
   const announced = await api.announce(base, token, [api.bashApi()])
   assert.equal(announced.status, 200)
   assert.equal(announced.body.apis.length, 1)
+  assert.equal(announced.body.apis[0].name, 'bash')
+  assert.equal(typeof announced.body.apis[0].id, 'number')
 
   const catalog = await api.commands(base, token, { after: 0 })
   assert.equal(catalog.status, 200)
@@ -71,7 +73,7 @@ test('узел создаётся админом и объявляет API', asy
 
   const nodes = await admin('/v1/admin/nodes')
   assert.equal(nodes.body.nodes.length, 1)
-  assert.deepEqual(nodes.body.nodes[0].apis, announced.body.apis)
+  assert.deepEqual(nodes.body.nodes[0].apis, announced.body.apis.map((entry) => entry.id))
 })
 
 test('команда едет до узла и возвращается результатом', async () => {
@@ -208,4 +210,40 @@ test('админка отдаётся страницей, без токена', 
   assert.match(html, /data-api="\/dsh-nodes\/v1\/admin"/)
   assert.match(html, /api\('\/pending'\)/)
   assert.match(html, /localStorage/)
+})
+
+test('pairing: админ выдаёт ссылку, клиент меняет код на токен, второй раз — 409', async () => {
+  const created = await admin('/v1/admin/pairing', { method: 'POST', body: JSON.stringify({ ttlSeconds: 600 }) })
+  assert.equal(created.status, 201)
+  assert.match(created.body.url, /\/dsh-nodes\/pair\?v=/)
+  assert.ok(created.body.code)
+
+  const paired = await fetch(`${base}/v1/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: created.body.code, uuid: 'pair-uuid-1', name: 'pair-node', proto: 1 }),
+  })
+  assert.equal(paired.status, 200)
+  const body = await paired.json()
+  assert.ok(body.token)
+  assert.equal(body.alias, 'pair-node')
+  assert.ok(store.nodeByToken(body.token), 'токен должен работать')
+
+  const again = await fetch(`${base}/v1/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: created.body.code, name: 'x' }),
+  })
+  assert.equal(again.status, 409)
+})
+
+test('pairing: истёкший код отвергается', async () => {
+  const created = await admin('/v1/admin/pairing', { method: 'POST', body: JSON.stringify({ ttlSeconds: 0.05 }) })
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const response = await fetch(`${base}/v1/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: created.body.code }),
+  })
+  assert.equal(response.status, 410)
 })
