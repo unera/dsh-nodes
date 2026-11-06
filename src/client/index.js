@@ -63,9 +63,7 @@ const CSS = `
 .dshn .editor { border: 1px solid rgba(128,128,128,.35); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .dshn .editor label { font-size: 12px; opacity: .7; display: block; margin-bottom: 4px; }
 .dshn .actions { display: flex; gap: 2px; justify-content: flex-end; }
-.dshn .tip { position: relative; }
-.dshn .tip::after { content: attr(data-tip); position: absolute; right: 0; top: 130%; z-index: 20; padding: 3px 7px; border-radius: 5px; font-size: 12px; white-space: nowrap; background: rgba(30,30,30,.96); color: #fff; opacity: 0; pointer-events: none; transition: opacity .12s; border: 1px solid rgba(255,255,255,.15); }
-.dshn .tip:hover::after, .dshn .tip:focus-visible::after { opacity: 1; }
+.dshn .tipbox { position: fixed; z-index: 40; padding: 3px 8px; border-radius: 5px; font-size: 12px; white-space: nowrap; background: rgba(28,28,30,.97); color: #fff; border: 1px solid rgba(255,255,255,.18); pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
 `
 
 function mountStyles () {
@@ -105,16 +103,22 @@ function Glyph ({ kind }) {
   }, h('path', { d: paths[kind] }))
 }
 
-function GlyphButton ({ kind, title, onClick, disabled, className }) {
+function GlyphButton ({ kind, title, onClick, disabled, className, onTip, onTipEnd }) {
+  const show = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    onTip?.({ text: title, x: rect.left + rect.width / 2, y: rect.bottom + 6 })
+  }
   return h('button', {
-    className: `glyph tip ${className ?? ''}`,
-    // своя подсказка: нативный title на телефоне не показывается, а на столе
-    // ждёт секунду и часто остаётся незамеченным
-    'data-tip': title,
-    title,
+    className: `glyph ${className ?? ''}`,
+    // подсказку рисуем сами и position: fixed — панель настроек обрезает всё,
+    // что выходит за её границы, поэтому absolute-подсказка там не видна
     'aria-label': title,
     disabled: Boolean(disabled),
     onClick,
+    onMouseEnter: show,
+    onFocus: show,
+    onMouseLeave: () => onTipEnd?.(),
+    onBlur: () => onTipEnd?.(),
   }, h(Glyph, { kind }))
 }
 
@@ -203,6 +207,7 @@ function NodesPanel () {
   const [newName, setNewName] = useState('')
   // одна открытая форма на всю панель: открытие другой закрывает прежнюю
   const [editing, setEditing] = useState(null)
+  const [tip, setTip] = useState(null)
 
   const say = (text, kind = '') => setMessage({ text, kind })
 
@@ -306,6 +311,8 @@ function NodesPanel () {
               node,
               busy,
               onEdit: (id) => setEditing((current) => (current === id ? null : id)),
+              onTip: setTip,
+              onTipEnd: () => setTip(null),
             onRevoke: (id) => {
               if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
               setSecret(null)
@@ -334,6 +341,14 @@ function NodesPanel () {
           })),
         ]),
     ]),
+
+    tip
+      ? h('div', {
+        key: 'tip',
+        className: 'tipbox',
+        style: { left: `${Math.round(tip.x)}px`, top: `${Math.round(tip.y)}px`, transform: 'translateX(-50%)' },
+      }, tip.text)
+      : null,
 
     h('section', { key: 'create' }, [
       h('h3', { key: 'h' }, 'Новый узел вручную'),
