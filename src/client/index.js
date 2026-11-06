@@ -80,6 +80,19 @@ function splitAliases (value) {
   return String(value ?? '').split(/[,\n;]+/).map((part) => part.trim()).filter(Boolean)
 }
 
+/** Аптайм узла: 3h 12m, 5m, 40s. */
+function uptimeText (seconds) {
+  if (seconds == null) return null
+  const total = Math.max(0, Math.round(seconds))
+  if (total < 60) return `${total}с`
+  const minutes = Math.round(total / 60)
+  if (minutes < 60) return `${minutes}м`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours < 24) return rest ? `${hours}ч ${rest}м` : `${hours}ч`
+  return `${Math.floor(hours / 24)}д ${hours % 24}ч`
+}
+
 function ago (ms) {
   if (!ms) return 'никогда'
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
@@ -180,6 +193,11 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
         h('span', { key: 'pill', className: `pill ${node.online ? 'on' : 'off'}` }, node.online ? 'online' : `offline · ${ago(node.lastSeen)}`),
       ]),
       h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || 'без алиасов'),
+      // аптайм отдельной строкой под именем: видно, работает ли узел с ночи или
+      // только что перезапустился
+      node.online && uptimeText(node.uptimeSeconds)
+        ? h('div', { key: 'u', className: 'muted', style: { fontSize: 12, marginTop: 2 } }, `работает ${uptimeText(node.uptimeSeconds)}`)
+        : null,
     ]),
     h('td', { key: 'apis' }, h('div', { className: 'chips' },
       node.apis.length
