@@ -121,6 +121,14 @@ function uptimeText (seconds) {
  * серый, отсутствие связи — красный.
  */
 /** Как режим DSH называется человеку. */
+/** Строка таблицы «что — как»: подпись и значение. */
+function row (what, value) {
+  return h('tr', { key: what }, [
+    h('td', { key: 'w', className: 'muted' }, what),
+    h('td', { key: 'v' }, h('code', null, String(value))),
+  ])
+}
+
 /** Как режим называется человеку: короткое имя и объяснение из словаря. */
 const MODE_SHORT = {
   'read-only': 'ro', 'workspace-write': 'rw', 'danger-full-access': 'FA',

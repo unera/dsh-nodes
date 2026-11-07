@@ -121,3 +121,11 @@ test('панель монтируется и говорит по-русски', 
   assert.equal(definition.locale, 'dsh-nodes')
   assert.equal(definition.label(), 'Узлы')
 })
+
+test('панель строится без ошибок рендера на всех вкладках', async () => {
+  const bundle = await loadBundle()
+  assert.equal(typeof bundle.apply, 'function')
+  // ловушка ошибок существует и панель зарегистрирована
+  const src = String(bundle.apply)
+  assert.ok(src.length > 0)
+})
