@@ -49,6 +49,7 @@ const CSS = `
 .dshn input, .dshn textarea { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; box-sizing: border-box; width: 100%; }
 .dshn .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dshn .muted { opacity: .6; }
+.dshn .badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid rgba(128,128,128,.35); cursor: help; }
 .dshn .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); margin-left: 6px; white-space: nowrap; }
 .dshn .on { color: #16a34a; border-color: #16a34a88; }
 /* связь была больше минуты назад — уже не зелёный */
@@ -105,6 +106,53 @@ function uptimeText (seconds) {
  * цвет показывает, насколько связь свежая: минута — уже не зелёный, пять —
  * серый, отсутствие связи — красный.
  */
+/** Как режим DSH называется человеку. */
+const MODE_TEXT = {
+  'read-only': 'ro',
+  'workspace-write': 'rw',
+  'danger-full-access': 'FA',
+  ro: 'ro',
+  rw: 'rw',
+  full: 'FA',
+}
+
+const MODE_TITLE = {
+  'read-only': 'ro — только чтение (read-only)',
+  'workspace-write': 'rw — запись только внутри разрешённых каталогов (workspace-write)',
+  'danger-full-access': 'FA — без песочницы: полный доступ (danger-full-access)',
+  ro: 'ro — только чтение (read-only)',
+  rw: 'rw — запись только внутри разрешённых каталогов (workspace-write)',
+  full: 'FA — без песочницы: полный доступ (danger-full-access)',
+}
+
+/**
+ * Плашка режима: `base` — с чего команда стартует, `upto` — докуда её можно
+ * поднять с подтверждением.
+ */
+function modeBadge (label, mode, kind) {
+  const text = MODE_TEXT[mode] ?? '—'
+  const explain = MODE_TITLE[mode] ?? 'узел ещё не объявил режим'
+  const hint = kind === 'base'
+    ? `base: ${explain}. В этом режиме команда стартует.`
+    : `upto: ${explain}. Потолок узла: выше не поднимется даже с подтверждением.`
+  return h('span', { key: label, className: 'badge', title: hint }, `${label}:${text}`)
+}
+
+/**
+ * Значок того, кто отвечает на вопрос о расширении прав.
+ *
+ * web — человек в DSH (диалог приходит в GUI), local — человек за этой машиной
+ * (вопрос всплывает на узле, например окном zenity), none — не спрашиваем никого.
+ */
+function approverBadge (approver) {
+  const view = {
+    server: { glyph: '🌐', hint: 'web: спрашивает человек в DSH — вопрос приходит в GUI' },
+    local: { glyph: '💻', hint: 'local: спрашивает человек за этой машиной — вопрос всплывает на узле (zenity и подобное)' },
+    none: { glyph: '∅', hint: 'none: вопросы выключены — отказ песочницы окончательный' },
+  }[approver] ?? { glyph: '?', hint: 'approver не объявлен' }
+  return h('span', { key: 'approver', className: 'badge', title: view.hint }, view.glyph)
+}
+
 function pillState (node) {
   if (!pillOnline(node)) return 'off'
   const age = node.lastSeen ? Date.now() - node.lastSeen : Infinity
@@ -243,7 +291,11 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
         ? node.apis.map((api) => h('span', { key: api.id, className: 'chip' }, `${api.name}${api.version ? `@${api.version}` : ''}`))
         : h('span', { className: 'muted' }, '—'))),
     h('td', { key: 'access' }, [
-      h('div', { key: 'a' }, node.access),
+      h('div', { key: 'modes', style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } }, [
+        modeBadge('base', node.base, 'base'),
+        modeBadge('upto', node.access, 'upto'),
+        approverBadge(node.approver),
+      ]),
       node.clientVersion ? h('div', { key: 'v', className: 'muted', style: { fontSize: 12 } }, node.clientVersion) : null,
     ]),
     h('td', { key: 'actions' }, h('div', { className: 'actions' }, [
