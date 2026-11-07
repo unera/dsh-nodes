@@ -905,3 +905,13 @@ test('аудит отдаётся по маршруту админки с пар
   assert.ok(body.audit.length >= 1)
   assert.ok(body.audit.length <= 5)
 })
+
+test('аудит отдаёт имя узла, а не только номер', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-name' }) })
+  const nodeId = created.body.node.id
+  store.writeAudit({ kind: 'exec', node: nodeId, mode: 'full', command: 'echo имя', at: Date.now() })
+  const { body } = adminApi.handleAdmin({ store, queue, config: CONFIG }, 'GET', '/audit?limit=5')
+  const row = body.audit.find((item) => item.node === nodeId)
+  assert.ok(row, 'запись должна быть в выдаче')
+  assert.equal(row.nodeName, 'audit-name', 'человеку нужен имя, а не номер')
+})

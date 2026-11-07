@@ -432,7 +432,9 @@ function NodesPanel () {
               : row.kind === 'approve'
                 ? `${row.outcome === 'approved' ? 'разрешил' : 'запретил'}`
                 : 'исполнено'),
-            h('td', { key: 'n' }, String(row.node ?? '—')),
+            h('td', { key: 'n' }, row.nodeName
+              ? [row.nodeName, h('span', { key: 'id', className: 'muted' }, ` #${row.node}`)]
+              : '—'),
             h('td', { key: 'm' }, h('code', null, row.mode ?? '—')),
             h('td', { key: 'c' }, h('code', null, String(row.command ?? '').slice(0, 120))),
           ]))),
