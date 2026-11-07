@@ -16,7 +16,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      # межрепозиторные тесты ходят в соседний репозиторий клиента
+      - uses: actions/checkout@v4
+        with:
+          repository: unera/dsh-node-client
+          path: .client-sibling
+      - run: ln -s "$PWD/.client-sibling" ../dsh-node-client
       - run: npm install --no-audit --no-fund
+      - run: npm install --no-audit --no-fund --prefix .client-sibling
       - name: собрать клиентскую половину
         run: node scripts/build-client.mjs
       - name: тесты
