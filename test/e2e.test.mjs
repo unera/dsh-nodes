@@ -938,3 +938,23 @@ test('не пинг — не трогаем результат', () => {
   assert.deepEqual(annotated, outcome)
 })
 
+
+test('пинг не ждёт дольше 15 секунд, обычный вызов — ждёт', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'ping-timeout', defaultTimeout: 600 }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [
+    { name: 'session', version: '5', methods: [{ method: 'ping', args: { type: 'object' } }] },
+  ])
+  const apiId = announced.apis[0]
+  const tools = createTools({ store, queue, config: CONFIG, epoch: queue.epoch, sandboxFor: () => ({ mode: 'danger-full-access' }) })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+
+  void call.execute({ node: nodeId, api: apiId, method: 'ping', data: {} }, {})
+  const ping = queue.take(nodeId, { limit: 5 }).commands[0]
+  assert.equal(ping.timeout, 15, 'пинг не должен ждать дольше 15 секунд')
+
+  // а если модель сама просит меньше — берём меньше
+  void call.execute({ node: nodeId, api: apiId, method: 'ping', data: {}, timeout: 3 }, {})
+  const short = queue.take(nodeId, { limit: 5 }).commands[0]
+  assert.equal(short.timeout, 3)
+})
