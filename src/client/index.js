@@ -590,6 +590,37 @@ export const name = 'dsh-nodes'
 export const inject = ['slots', 'locale']
 
 /**
+ * Ловушка ошибок рендера.
+ *
+ * Без неё любое исключение внутри панели размонтирует всё поддерево, и человек
+ * видит «была панель и исчезла» — без единого слова о причине. С ней вместо
+ * пустоты показывается текст ошибки, который можно переслать.
+ */
+class Boundary extends Component {
+  constructor (props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError (error) {
+    return { error }
+  }
+
+  componentDidCatch (error) {
+    try {
+      console.error('[dsh-nodes] панель упала:', error)
+    } catch {}
+  }
+
+  render () {
+    if (this.state.error) {
+      return h('div', { className: 'msg bad' }, `панель dsh-nodes упала: ${this.state.error?.message ?? this.state.error}`)
+    }
+    return this.props.children
+  }
+}
+
+/**
  * Перевод панели. До `apply` работает свой словарь: разметка остаётся
  * работоспособной, даже если `ctx.locale` почему-то не смонтировался.
  */
@@ -656,7 +687,8 @@ export function apply (ctx) {
     }
     slots.inject('settings.section', () => slots.register(
       { name: 'settings.section', id: 'dsh-nodes', order: 35, locale: NS, label: () => t('nodes.title') },
-      NodesPanel,
+      // панель завёрнута в ловушку: ошибка рендера покажет текст, а не пустоту
+      () => h(Boundary, null, h(NodesPanel, null)),
     ))
   } catch (error) {
     console.warn('[dsh-nodes] клиентская половина не смонтировалась:', error)
