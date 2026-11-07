@@ -187,3 +187,37 @@ test('отзыв токена рвёт открытую сессию', async () 
   assert.equal(code, 4401, 'сессия должна закрыться с кодом «токен отозван»')
   assert.equal(presence.online(node.id), false)
 })
+
+test('alive с отставшим номером получает state сразу, с актуальным — молчит', async () => {
+  const { node, token } = await makeNode('sensor')
+  const socket = await open(token)
+  socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(socket, 'hello-ok')
+  queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
+
+  // клиент знает 0, у сервера уже 1 — ответ должен прийти сразу.
+  // Слушателя вешаем до отправки: на localhost ответ успевает раньше.
+  const waitingState = frame(socket, 'state')
+  socket.send(JSON.stringify({ t: 'alive', known: 0 }))
+  const state = await waitingState
+  assert.equal(state.state, 1, 'кадр несёт номер последней команды')
+
+  // теперь клиент в курсе — сервер молчит и запоминает ожидание
+  const maybeState = frame(socket, 'state')
+  socket.send(JSON.stringify({ t: 'alive', known: 1 }))
+  const silence = await Promise.race([
+    maybeState,
+    new Promise((resolve) => setTimeout(() => resolve('тишина'), 300)),
+  ])
+  assert.equal(silence, 'тишина', 'на пустом приросте кадров быть не должно')
+
+  // а как только работа появилась — приходит сам
+  // ожидание уже стоит, значит новую работу сервер должен объявить сам —
+  // ровно так это делает плагин после постановки команды
+  const pushedState = frame(socket, 'state')
+  queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
+  presence.notify(node.id)
+  const pushed = await pushedState
+  assert.equal(pushed.state, 2)
+  socket.close()
+})

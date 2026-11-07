@@ -309,8 +309,12 @@ paths:
          - `{t:"hello", epoch, known, access, workdir, allowEscalation, approver, uptimeSeconds, boot}` —
            the first frame; `epoch` from a previous connection lets the server
            answer `reconnect: true`;
-         - `{t:"alive", known}` — "I am alive and idle"; the answer is `state`
-           only when there is work;
+         - `{t:"alive", known}` — "I am alive, and I know commands up to
+           `known`". The server answers with `{t:"state", state:N}` **at once** if
+           `N > known`, otherwise it stays silent and marks the node as waiting,
+           so the answer arrives later, pushed by a new command. This is the
+           whole polling replacement: an idle node and an idle server exchange
+           nothing but this one number;
          - `{t:"pong"}`.
 
         Server to client:
