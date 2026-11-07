@@ -62,6 +62,9 @@ const CSS = `
 .dshn .cold { color: #6b7280; border-color: #6b728088; }
 /* offline — красный */
 .dshn .off { color: #ef4444; border-color: #ef444488; }
+.dshn .tabs { display: flex; gap: 6px; margin: 10px 0; border-bottom: 1px solid rgba(128,128,128,.25); }
+.dshn .tab { font: inherit; font-size: 13px; padding: 6px 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: inherit; opacity: .65; cursor: pointer; }
+.dshn .tab.active { opacity: 1; border-bottom-color: currentColor; }
 .dshn .msg { min-height: 18px; font-size: 13px; }
 .dshn .msg.bad { color: #ef4444; }
 .dshn .msg.good { color: #16a34a; }
@@ -163,6 +166,14 @@ function approverBadge (approver) {
   // узел не объявил — плашки нет, а не «?»
   if (!view) return null
   return h('span', { key: 'approver', className: 'badge', title: view.hint }, view.glyph)
+}
+
+/** Строка таблицы «что — как». */
+function row (what, value) {
+  return h('tr', { key: what }, [
+    h('td', { key: 'w', className: 'muted' }, what),
+    h('td', { key: 'v' }, h('code', null, String(value))),
+  ])
 }
 
 function pillState (node) {
@@ -330,6 +341,16 @@ function NodesPanel () {
   const [ttl, setTtl] = useState(600)
   const [newName, setNewName] = useState('')
   const [audit, setAudit] = useState([])
+  const [settings, setSettings] = useState(null)
+  const [tab, setTab] = useState('connections')
+  /** Секция видна только на своей вкладке. */
+  const only = (name) => ({ display: tab === name ? 'block' : 'none' })
+  const tabButton = (id, label) => h('button', {
+    key: id,
+    className: tab === id ? 'tab active' : 'tab',
+    disabled: busy,
+    onClick: () => setTab(id),
+  }, label)
   // одна открытая форма на всю панель: открытие другой закрывает прежнюю
   const [editing, setEditing] = useState(null)
   const [tip, setTip] = useState(null)
@@ -348,6 +369,11 @@ function NodesPanel () {
       setEpoch(list.epoch ?? null)
       setPending(waiting.pending ?? [])
       setAudit(events.audit ?? [])
+      try {
+        setSettings(await request('/settings'))
+      } catch {
+        setSettings(null)
+      }
     } catch (error) {
       say(error.message, 'bad')
     }
@@ -407,9 +433,16 @@ function NodesPanel () {
   }, [
     h('div', { key: 'msg', className: `msg ${message.kind}` },
       message.text || (epoch != null ? `epoch ${epoch}, устройств ${nodes.length}` : '')),
+    // Панель разбита на вкладки: подключения — то, с чего начинают, аудит —
+    // то, куда смотрят редко, настройки — то, что меняют один раз.
+    h('div', { key: 'tabs', className: 'tabs' }, [
+      tabButton('connections', 'Подключения'),
+      tabButton('audit', 'Аудит'),
+      tabButton('settings', 'Общие настройки'),
+    ]),
     secret ? h('div', { key: 'secret', className: 'secret' }, `токен (показывается один раз): ${secret}`) : null,
 
-    h('section', { key: 'pair' }, [
+    h('section', { key: 'pair', style: only('connections') }, [
       h('h3', { key: 'h' }, 'Подключить клиента'),
       h('div', { key: 'r', className: 'row' }, [
         h('input', { key: 'ttl', type: 'number', value: ttl, style: { width: 90 }, onChange: (e) => setTtl(Number(e.target.value) || 600) }),
@@ -432,7 +465,7 @@ function NodesPanel () {
         'На узле: dshnc connect <ссылка>. Подтверждать здесь ничего не нужно, код одноразовый.'),
     ]),
 
-    h('section', { key: 'pending' }, [
+    h('section', { key: 'pending', style: only('connections') }, [
       h('h3', { key: 'h' }, `Заявки без кода (${pending.length})`),
       pending.length === 0
         ? h('div', { key: 'e', className: 'empty' }, 'нет')
@@ -454,7 +487,7 @@ function NodesPanel () {
         ]),
     ]),
 
-    h('section', { key: 'nodes' }, [
+    h('section', { key: 'nodes', style: only('connections') }, [
       h('h3', { key: 'h' }, `Устройства (${nodes.length})`),
       nodes.length === 0
         ? h('div', { key: 'e', className: 'empty' }, 'нет')
@@ -519,7 +552,7 @@ function NodesPanel () {
       }, tip.text)
       : null,
 
-    h('section', { key: 'audit' }, [
+    h('section', { key: 'audit', style: only('audit') }, [
       h('h3', { key: 'h' }, 'Аудит (последние события)'),
       audit.length === 0
         ? h('div', { key: 'e', className: 'empty' }, 'пока пусто')
@@ -544,7 +577,7 @@ function NodesPanel () {
         ]),
     ]),
 
-    h('section', { key: 'create' }, [
+    h('section', { key: 'create', style: only('connections') }, [
       h('h3', { key: 'h' }, 'Новый узел вручную'),
       h('div', { key: 'r', className: 'row' }, [
         h('input', { key: 'i', value: newName, placeholder: 'имя, например nbw', style: { width: 220 }, onChange: (e) => setNewName(e.target.value) }),
@@ -554,6 +587,27 @@ function NodesPanel () {
           onClick: () => { run({ op: 'create', body: { name: newName.trim() } }, 'узел создан'); setNewName('') },
         }, 'создать и выдать токен'),
       ]),
+    ]),
+
+    h('section', { key: 'settings', style: only('settings') }, [
+      h('h3', { key: 'h' }, 'Общие настройки'),
+      h('div', { key: 'note', className: 'muted' },
+        'Меняются в конфиге плагина и применяются после перезапуска. Здесь показано, что действует сейчас.'),
+      settings
+        ? h('table', { key: 't' }, [
+          h('tbody', { key: 'b' }, [
+            row('self — каталоги хоста, куда можно копировать с узлов',
+              (settings.selfRoots ?? []).length ? settings.selfRoots.join(', ') : 'нет (self выключен)'),
+            row('сколько модель ждёт ответа на вопрос', `${settings.approvalWaitSeconds} с (0 — до отмены)`),
+            row('сколько вопрос живёт в очереди узла', `${settings.approvalTtlSeconds} с`),
+            row('узел считается живым после последней связи', `${settings.aliveTimeoutSeconds} с`),
+            row('пинг по сокету', settings.wsPingSeconds ? `каждые ${settings.wsPingSeconds} с` : 'выключен'),
+          ]),
+        ])
+        : h('div', { className: 'muted' }, 'не удалось прочитать настройки'),
+      h('div', { key: 'selfnote', className: 'muted', style: { marginTop: 8 } },
+        'Копирование на хост работает только для каталогов из self: это отдельное разрешение, '
+        + 'потому что дальше модель может трогать их локальным shell — уже под песочницей DSH.'),
     ]),
   ])
 }

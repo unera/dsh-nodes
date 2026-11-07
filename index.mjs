@@ -45,6 +45,10 @@ export const Config = z.object({
   maxBodyBytes: z.natural().default(1048576).description('Потолок тела запроса'),
   aliveTimeoutSeconds: z.natural().default(60).description('Сколько без обращений считать узел живым'),
   wsPingSeconds: z.natural().default(0).description('Период пинга по сокету; 0 — не пинговать'),
+  // каталоги на хосте DSH, куда разрешено копировать файлы с узлов; пусто —
+  // `self` выключен, и это осознанное умолчание: иначе модель писала бы на хост
+  selfRoots: z.array(z.string()).default([]).description('Каталоги хоста для self; пусто — self выключен'),
+  approvalWaitSeconds: z.natural().default(600).description('Сколько модель ждёт ответа на вопрос; 0 — до отмены'),
   maxPendingEnroll: z.natural().default(50).description('Потолок списка заявок на регистрацию'),
   adminTokenFile: z.string().description('Где лежит сгенерированный админ-токен'),
 })
@@ -255,6 +259,7 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
       { path: '/api/dsh-nodes/pending', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/pending', {}) },
       // аудит читает панель; без маршрута раздел молча пустой
       { path: '/api/dsh-nodes/audit', methods: ['GET'], run: (deps, body, url) => handleAdmin(deps, 'GET', `/audit${url?.search ?? ''}`, {}) },
+      { path: '/api/dsh-nodes/settings', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/settings', {}) },
       { path: '/api/dsh-nodes/op', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
     ]
 
