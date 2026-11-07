@@ -7,6 +7,7 @@ import { createServer } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { after, before, test } from 'node:test'
 
 import { Store } from '../lib/db.mjs'
@@ -874,4 +875,21 @@ test('close различает «уже закрыта» и «такой не б
   await promise
   assert.equal(queue.close(nodeId, seq, { ok: true, results: [] }), 'already')
   assert.equal(queue.close(nodeId, seq + 100, { ok: true, results: [] }), 'unknown')
+})
+
+test('схема доводится по факту: нехватка колонки не мешает старту', async () => {
+  // имитируем живую базу, где user_version «всё применено», а колонки нет
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-nodes-heal-'))
+  const file = join(dir, 'state.sqlite')
+  const raw = new DatabaseSync(file)
+  raw.exec("CREATE TABLE node (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, token_sha256 TEXT, access TEXT DEFAULT 'none', allow_escalation INTEGER DEFAULT 1)")
+  raw.exec('PRAGMA user_version = 99')
+  raw.close()
+
+  const healed = new Store(file)
+  const columns = healed.db.prepare('PRAGMA table_info(node)').all().map((row) => row.name)
+  assert.ok(columns.includes('approver'), 'колонка должна появиться, даже если счётчик говорит «всё применено»')
+  assert.ok(columns.includes('boot_at'))
+  healed.close()
+  rmSync(dir, { recursive: true, force: true })
 })
