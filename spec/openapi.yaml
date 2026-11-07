@@ -724,7 +724,26 @@ components:
             node to know how long the command waited in the queue.
         session:
           type: string
-          description: model session; the client uses it to set up a per-session working directory
+          description: |
+            Model session id. The client uses it to keep a per-session working
+            directory, and the approval tool receives it as `DSHNC_SESSION`.
+        question:
+          type: object
+          nullable: true
+          description: |
+            Which question of the human this command belongs to: the root tool
+            call of the turn. The approval dialog receives these ids in the
+            environment, so a local tool can remember "answer yes until the end
+            of this question" (`rootCallId`) or "until the end of this session"
+            (`session`).
+          properties:
+            rootCallId:
+              type: string
+              description: root tool call of the turn — stable for every command made within one question
+            callId:
+              type: string
+              nullable: true
+              description: the exact call that produced this command; handy for logs, not for caching decisions
 
     Result:
       type: object
