@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install --no-audit --no-fund
+      - name: собрать клиентскую половину
+        run: node scripts/build-client.mjs
+      - name: тесты
+        run: node --test test/*.test.mjs
+      - name: спека разбирается
+        run: npx --yes js-yaml@4 spec/openapi.yaml > /dev/null
+      - name: панель собрана из исходников
+        run: git diff --exit-code lib/client.js
