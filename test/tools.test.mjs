@@ -129,3 +129,35 @@ test('кусок копирования влезает в предел тела 
   const maxBody = Number(/maxBodyBytes \?\? ([0-9* ]+)/.exec(source)?.[1]?.trim().replace(/\s/g, '').split('*').reduce((a, b) => Number(a) * Number(b), 1) ?? 0)
   assert.ok(DEFAULT_CHUNK * 1.4 < maxBody, `кусок ${DEFAULT_CHUNK} с base64 не влезает в ${maxBody}`)
 })
+
+test('просили full без strict: режим уходит узлу как есть, вопроса нет', async () => {
+  const { node } = store.createNode({ name: 'rw-node', access: 'danger-full-access', allowEscalation: 1 })
+  store.announce(node.id, [{ name: 'shell', version: '1', methods: [{ method: 'exec', args: { type: 'object' } }] }])
+  const api = { id: store.nodeApis(node.id)[0] }
+
+  // очередь-шпион: запоминаем, что именно ушло узлу, и отвечаем успехом сразу
+  const sent = []
+  const spyQueue = {
+    epoch: queue.epoch,
+    enqueue (command) {
+      sent.push(command)
+      return { seq: sent.length, promise: Promise.resolve({ status: 'ok', code: 0, results: [] }) }
+    },
+    cancel () {},
+  }
+  const localTools = createTools({
+    store, queue: spyQueue, config: { aliveTimeoutSeconds: 60 }, epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'rw' }),
+  })
+  const call = localTools.find((tool) => tool.name === 'nodes_call')
+  await call.execute({ node: node.id, api: api.id, method: 'exec', data: {}, sandbox: 'full' }, {})
+
+  assert.equal(sent.length, 1, 'должна уйти ровно одна команда')
+  assert.equal(sent[0].method, 'exec')
+  // сервер передаёт запрошенный режим как есть: понижение до стартового — дело
+  // узла (он смотрит на approved: без него режим сужается до base)
+  assert.equal(sent[0].sandbox.mode, 'danger-full-access')
+  assert.equal(sent[0].approved ?? null, null, 'без strict согласия нет, значит узел сузит режим')
+  // и апрува нет: отказ ядра не наступал, поднимать не из чего
+  assert.equal(sent.filter((command) => command.method === 'approve').length, 0)
+})
