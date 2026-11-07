@@ -51,6 +51,11 @@ const CSS = `
 .dshn .muted { opacity: .6; }
 .dshn .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); margin-left: 6px; white-space: nowrap; }
 .dshn .on { color: #16a34a; border-color: #16a34a88; }
+/* связь была больше минуты назад — уже не зелёный */
+.dshn .stale { color: #3b82f6; border-color: #3b82f688; }
+/* больше пяти минут — серый */
+.dshn .cold { color: #6b7280; border-color: #6b728088; }
+/* offline — красный */
 .dshn .off { color: #ef4444; border-color: #ef444488; }
 .dshn .msg { min-height: 18px; font-size: 13px; }
 .dshn .msg.bad { color: #ef4444; }
@@ -91,6 +96,21 @@ function uptimeText (seconds) {
   const rest = minutes % 60
   if (hours < 24) return rest ? `${hours}ч ${rest}м` : `${hours}ч`
   return `${Math.floor(hours / 24)}д ${hours % 24}ч`
+}
+
+/**
+ * Состояние узла для плашки.
+ *
+ * «online» означает «присоединён» (держится сокет или есть свежий контакт), а
+ * цвет показывает, насколько связь свежая: минута — уже не зелёный, пять —
+ * серый, отсутствие связи — красный.
+ */
+function pillState (node) {
+  if (!node.online) return 'off'
+  const age = node.lastSeen ? Date.now() - node.lastSeen : Infinity
+  if (age < 60_000) return 'on'
+  if (age < 300_000) return 'stale'
+  return 'cold'
 }
 
 function ago (ms) {
@@ -190,17 +210,17 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
     h('td', { key: 'name' }, [
       h('div', { key: 'n' }, [
         h('span', { key: 'name' }, node.name),
-        h('span', { key: 'pill', className: `pill ${node.online ? 'on' : 'off'}` }, node.online ? 'online' : `offline · ${ago(node.lastSeen)}`),
+        h('span', {
+          key: 'pill',
+          // цвет плашки говорит о свежести связи: зелёный — только что, синий —
+          // больше минуты, серый — больше пяти, красный — связи нет вовсе
+          className: `pill ${pillState(node)}`,
+          title: node.lastSeen ? `последняя связь: ${ago(node.lastSeen)} назад` : 'связи ещё не было',
+        }, node.online ? 'online' : 'offline'),
       ]),
       h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || 'без алиасов'),
       // аптайм отдельной строкой под именем: видно, работает ли узел с ночи или
       // только что перезапустился
-      h('div', { key: 'flags', style: { display: 'flex', gap: 8, fontSize: 12, marginTop: 2 } }, [
-        h('span', { key: 's', style: { color: node.socket ? '#22c55e' : '#9ca3af' } },
-          node.socket ? 'сокет: есть' : 'сокет: нет'),
-        h('span', { key: 'l', className: 'muted' },
-          node.lastSeen ? `связь: ${ago(node.lastSeen)} назад` : 'связи не было'),
-      ]),
       node.online && uptimeText(node.uptimeSeconds)
         ? h('div', { key: 'u', className: 'muted', style: { fontSize: 12, marginTop: 2 } }, `работает ${uptimeText(node.uptimeSeconds)}`)
         : null,
