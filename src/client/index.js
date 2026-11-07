@@ -50,6 +50,10 @@ const CSS = `
 .dshn .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dshn .muted { opacity: .6; }
 .dshn .badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid rgba(128,128,128,.35); cursor: help; }
+/* режимы цветом: ro — красный, rw — синий, full — зелёный */
+.dshn .badge.ro { color: #ef4444; border-color: #ef444488; }
+.dshn .badge.rw { color: #3b82f6; border-color: #3b82f688; }
+.dshn .badge.fa { color: #16a34a; border-color: #16a34a88; }
 .dshn .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); margin-left: 6px; white-space: nowrap; }
 .dshn .on { color: #16a34a; border-color: #16a34a88; }
 /* связь была больше минуты назад — уже не зелёный */
@@ -130,12 +134,15 @@ const MODE_TITLE = {
  * поднять с подтверждением.
  */
 function modeBadge (label, mode, kind) {
-  const text = MODE_TEXT[mode] ?? '—'
-  const explain = MODE_TITLE[mode] ?? 'узел ещё не объявил режим'
+  // нет данных — нет плашки: «base:—» и вопросительные знаки только мешают
+  if (!mode) return null
+  const text = MODE_TEXT[mode] ?? mode
+  const tone = { ro: 'ro', rw: 'rw', full: 'fa' }[mode] ?? null
+  const explain = MODE_TITLE[mode] ?? String(mode)
   const hint = kind === 'base'
     ? `base: ${explain}. В этом режиме команда стартует.`
     : `upto: ${explain}. Потолок узла: выше не поднимется даже с подтверждением.`
-  return h('span', { key: label, className: 'badge', title: hint }, `${label}:${text}`)
+  return h('span', { key: label, className: `badge ${tone ?? ''}`, title: hint }, `${label}:${text}`)
 }
 
 /**
@@ -149,7 +156,9 @@ function approverBadge (approver) {
     server: { glyph: '🌐', hint: 'web: спрашивает человек в DSH — вопрос приходит в GUI' },
     local: { glyph: '💻', hint: 'local: спрашивает человек за этой машиной — вопрос всплывает на узле (zenity и подобное)' },
     none: { glyph: '∅', hint: 'none: вопросы выключены — отказ песочницы окончательный' },
-  }[approver] ?? { glyph: '?', hint: 'approver не объявлен' }
+  }[approver]
+  // узел не объявил — плашки нет, а не «?»
+  if (!view) return null
   return h('span', { key: 'approver', className: 'badge', title: view.hint }, view.glyph)
 }
 
