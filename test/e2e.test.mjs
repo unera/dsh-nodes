@@ -835,7 +835,11 @@ test('человек разрешил в DSH-апруве — повтор ух�
     body: JSON.stringify({ ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 0, sandbox: { mode: 'full' } }) }] }),
   })
   const outcome = await running
-  assert.equal(outcome.results.length, 1)
+  assert.equal(outcome.results.length, 2, 'результат команды плюс сводка о вызове')
+  const info = JSON.parse(outcome.results[1].text).call
+  assert.equal(info.escalated, true, 'видно, что был апрув')
+  assert.equal(info.escalation, 1)
+  assert.equal(info.mode, 'full')
 })
 
 test('просроченная невыданная команда получает ответ, а не тишину', async () => {
@@ -935,4 +939,39 @@ test('не пинг — не трогаем результат', () => {
   const outcome = { ok: true, results: [{ type: 'text', text: 'обычный вывод' }] }
   const annotated = adminApi.annotate?.(outcome, { method: 'exec' }) ?? outcome
   assert.deepEqual(annotated, outcome)
+})
+
+test('сводка о вызове: время раундтрипа и режим', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'call-info' }) })
+  const nodeId = created.body.node.id
+  const token = created.body.token
+  const announced = store.announce(nodeId, [
+    { name: 'shell', version: '2', methods: [{ method: 'exec', args: { type: 'object' } }] },
+  ])
+  const apiId = announced.apis[0]
+  const tools = createTools({ store, queue, config: CONFIG, epoch: queue.epoch, sandboxFor: () => ({ mode: 'danger-full-access' }) })
+  const callTool = tools.find((tool) => tool.name === 'nodes_call')
+  const running = callTool.execute({ node: nodeId, api: apiId, method: 'exec', data: { command: 'echo' } }, {})
+
+  const take = async () => {
+    for (let i = 0; i < 60; i++) {
+      const got = queue.take(nodeId, { limit: 5 })
+      if (got.commands.length) return got.commands[0]
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('команда не выдана')
+  }
+  const command = await take()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  await fetch(`${base}/v1/commands/${command.seq}/result`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ok: true, results: [{ type: 'text', text: JSON.stringify({ code: 0, sandbox: { mode: 'full' } }) }] }),
+  })
+  const outcome = await running
+  const info = JSON.parse(outcome.results.at(-1).text).call
+  assert.ok(info.rttMs >= 25, `должно быть не меньше задержки теста, а вышло ${info.rttMs}`)
+  assert.equal(info.mode, 'full')
+  assert.equal(info.escalated, false)
+  assert.equal(info.status, 'ok')
 })
