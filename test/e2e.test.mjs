@@ -915,3 +915,24 @@ test('аудит отдаёт имя узла, а не только номер',
   assert.ok(row, 'запись должна быть в выдаче')
   assert.equal(row.nodeName, 'audit-name', 'человеку нужен имя, а не номер')
 })
+
+test('пинг размечен метками времени: отклик и разница часов считаются', async () => {
+  const { annotatePing, preciseNow } = await import('../lib/tools.mjs').then(async (tools) => ({
+    annotatePing: tools.annotatePing,
+    preciseNow: (await import('../lib/queue.mjs')).preciseNow,
+  }))
+  const sent = preciseNow() - 20
+  // часы узла ушли вперёд на полторы секунды
+  const outcome = { ok: true, results: [{ type: 'text', text: JSON.stringify({ pong: preciseNow() + 1500, sentAt: sent }) }] }
+  const annotated = annotatePing(outcome, { method: 'ping' })
+  assert.equal(annotated.results.length, 2)
+  const extra = JSON.parse(annotated.results[1].text)
+  assert.ok(extra.rttMs >= 20 && extra.rttMs < 100, `отклик должен быть около 20 мс, а вышел ${extra.rttMs}`)
+  assert.ok(extra.clockSkewMs > 1400 && extra.clockSkewMs < 1600, `разница часов около 1500 мс, а вышло ${extra.clockSkewMs}`)
+})
+
+test('не пинг — не трогаем результат', () => {
+  const outcome = { ok: true, results: [{ type: 'text', text: 'обычный вывод' }] }
+  const annotated = adminApi.annotate?.(outcome, { method: 'exec' }) ?? outcome
+  assert.deepEqual(annotated, outcome)
+})
