@@ -2,7 +2,7 @@
  * Клиентская половина dsh-nodes: секция «Узлы» в настройках DSH.
  *
  * Панель нативная, как у остальных наших плагинов: React-компонент внутри слота
- * `settings.section`, данные — с `/api/dsh-nodes/*` (owner-гейт ядра, кука
+ * `settings.sectiont('confirm.separator')/api/dsh-nodes/*` (owner-гейт ядра, кука
  * владельца уходит сама, токенов в браузере нет).
  *
  * Сборка: scripts/build-client.mjs.
@@ -104,13 +104,13 @@ function splitAliases (value) {
 function uptimeText (seconds) {
   if (seconds == null) return null
   const total = Math.max(0, Math.round(seconds))
-  if (total < 60) return `${total}с`
+  if (total < 60) return `${total}s`
   const minutes = Math.round(total / 60)
-  if (minutes < 60) return `${minutes}м`
+  if (minutes < 60) return `${minutes}m`
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
-  if (hours < 24) return rest ? `${hours}ч ${rest}м` : `${hours}ч`
-  return `${Math.floor(hours / 24)}д ${hours % 24}ч`
+  if (hours < 24) return rest ? `${hours}h ${rest}m` : `${hours}h`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
 /**
@@ -185,10 +185,10 @@ function pillOnline (node) {
 function ago (ms) {
   if (!ms) return t('pill.never')
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
-  if (s < 60) return `${s}с`
-  if (s < 3600) return `${Math.round(s / 60)}м`
-  if (s < 86400) return `${Math.round(s / 3600)}ч`
-  return `${Math.round(s / 86400)}д`
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.round(s / 60)}m`
+  if (s < 86400) return `${Math.round(s / 3600)}h`
+  return `${Math.round(s / 86400)}d`
 }
 
 /** Глифы свои, без внешних библиотек. */
@@ -376,7 +376,7 @@ function NodesPanel () {
       const result = await op(payload)
       say(okText, 'good')
       if (result?.token) setSecret(result.token)
-      if (result?.rejected?.length) say(`заняты другими узлами: ${result.rejected.join(', ')}`, 'bad')
+      if (result?.rejected?.length) say(t('err.aliasesTaken', { list: result.rejected.join(', ') }), 'bad')
       await load()
       return { ok: true }
     } catch (error) {
@@ -451,7 +451,7 @@ function NodesPanel () {
     ]),
 
     h('section', { key: 'pending', style: only('connections') }, [
-      h('h3', { key: 'h' }, `Заявки без кода (${pending.length})`),
+      h('h3', { key: 'h' }, `${t('pending.title')} (${pending.length})`),
       pending.length === 0
         ? h('div', { key: 'e', className: 'empty' }, t('nodes.none'))
         : h('table', { key: 't' }, [
@@ -463,7 +463,7 @@ function NodesPanel () {
             h('td', { key: 'n' }, row.name),
             h('td', { key: 'i' }, h('code', null, row.short)),
             h('td', { key: 'a' }, row.ip ?? '—'),
-            h('td', { key: 'w' }, `${row.waiting} с`),
+            h('td', { key: 'w' }, `${row.waiting} ${t('unit.sec')}`),
             h('td', { key: 'x' }, h('div', { className: 'row' }, [
               h('button', { key: 'y', className: 'primary', disabled: busy, onClick: () => run({ op: 'approve', id: row.uuid }, t('pending.allowed')) }, t('pending.allow')),
               h('button', { key: 'r', className: 'danger', disabled: busy, onClick: () => run({ op: 'reject', id: row.uuid }, t('pending.denied')) }, t('pending.deny')),
@@ -473,7 +473,7 @@ function NodesPanel () {
     ]),
 
     h('section', { key: 'nodes', style: only('connections') }, [
-      h('h3', { key: 'h' }, `Устройства (${nodes.length})`),
+      h('h3', { key: 'h' }, `${t('nodes.title')} (${nodes.length})`),
       nodes.length === 0
         ? h('div', { key: 'e', className: 'empty' }, t('nodes.none'))
         : h('table', { key: 't' }, [
@@ -491,7 +491,7 @@ function NodesPanel () {
               setEditing((current) => (current === id ? null : id))
             },
             onRevoke: (id) => {
-              if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
+              if (typeof window !== 'undefined' && !window.confirm(t('confirm.revoke', { id }))) return
               setSecret(null)
               run({ op: 'token', id }, t('nodes.tokenReissued'))
             },
@@ -515,7 +515,7 @@ function NodesPanel () {
                   const taken = nodes.find((other) => other.id !== id &&
                     other.aliases.some((alias) => alias.toLowerCase() === String(body.name).toLowerCase()))
                   if (taken) {
-                    setEditorError(`Имя «${body.name}» уже занято узлом ${taken.id} (${taken.name})`)
+                    setEditorError(t('err.nameTaken', { name: body.name, id: taken.id, owner: taken.name }))
                     return
                   }
                   const result = await run({ op: 'update', id, body }, t('nodes.saved'))
@@ -647,7 +647,7 @@ let translate = (key, vars) => {
 const t = (key, vars) => translate(key, vars)
 
 /**
- * Регистрирует словари в `ctx.locale` и привязывает `t` к текущему языку.
+ * Регистрирует словари в `ctx.localet('confirm.binds')t` к текущему языку.
  *
  * Свой словарь остаётся запасным: если сервиса локали нет, панель говорит
  * по-русски, а не показывает ключи.

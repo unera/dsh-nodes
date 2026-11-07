@@ -10,6 +10,12 @@
 export const NS = 'dsh-nodes'
 
 export const en = {
+  'unit.sec': 's',
+  'confirm.separator': ', data from ',
+  'confirm.binds': ' and binds ',
+  'err.nameTaken': 'Name "{name}" is already used by node {id} ({owner})',
+  'err.aliasesTaken': 'taken by other nodes: {list}',
+  'confirm.revoke': 'Revoke the token of node {id}? The current one stops working immediately.',
   'tab.connections': 'Connections',
   'tab.audit': 'Audit',
   'tab.settings': 'Settings',
@@ -90,6 +96,12 @@ export const en = {
 }
 
 export const ru = {
+  'unit.sec': 'с',
+  'confirm.separator': ', данные — с ',
+  'confirm.binds': ' и привязывает ',
+  'err.nameTaken': 'Имя «{name}» уже занято узлом {id} ({owner})',
+  'err.aliasesTaken': 'заняты другими узлами: {list}',
+  'confirm.revoke': 'Отозвать токен узла {id}? Текущий перестанет работать сразу.',
   'tab.connections': 'Подключения',
   'tab.audit': 'Аудит',
   'tab.settings': 'Общие настройки',
@@ -170,6 +182,12 @@ export const ru = {
 }
 
 export const zh = {
+  'unit.sec': '秒',
+  'confirm.separator': '，数据来自 ',
+  'confirm.binds': ' 并绑定 ',
+  'err.nameTaken': '名称“{name}”已被节点 {id}（{owner}）占用',
+  'err.aliasesTaken': '已被其他节点占用：{list}',
+  'confirm.revoke': '撤销节点 {id} 的令牌？当前令牌将立即失效。',
   'tab.connections': '连接',
   'tab.audit': '审计',
   'tab.settings': '设置',
