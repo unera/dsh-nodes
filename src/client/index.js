@@ -8,6 +8,11 @@
  * Сборка: scripts/build-client.mjs.
  */
 import { createElement as h, useEffect, useState } from 'react'
+import * as React from 'react'
+
+// `Component` нужен для ловушки ошибок; в тестовой заглушке react его нет,
+// а `class extends undefined` падает ещё до рендера — поэтому запасной вариант
+const Base = React.Component ?? Object
 
 import { NS, en, ru, zh } from './i18n.js'
 
@@ -596,7 +601,7 @@ export const inject = ['slots', 'locale']
  * видит «была панель и исчезла» — без единого слова о причине. С ней вместо
  * пустоты показывается текст ошибки, который можно переслать.
  */
-class Boundary extends Component {
+class Boundary extends Base {
   constructor (props) {
     super(props)
     this.state = { error: null }
