@@ -238,6 +238,8 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
       { path: '/api/dsh-nodes/nodes', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/nodes', {}) },
       { path: '/api/dsh-nodes/catalog', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/catalog', {}) },
       { path: '/api/dsh-nodes/pending', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/pending', {}) },
+      // аудит читает панель; без маршрута раздел молча пустой
+      { path: '/api/dsh-nodes/audit', methods: ['GET'], run: (deps, body, url) => handleAdmin(deps, 'GET', `/audit${url?.search ?? ''}`, {}) },
       { path: '/api/dsh-nodes/op', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
     ]
 

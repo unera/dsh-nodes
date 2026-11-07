@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { after, before, test } from 'node:test'
 
 import { Store } from '../lib/db.mjs'
+import * as adminApi from '../lib/admin-api.mjs'
 import { Queue } from '../lib/queue.mjs'
 import { createTools, humanUptime, sandboxReport } from '../lib/tools.mjs'
 import { createNodesServer } from '../lib/server.mjs'
@@ -892,4 +893,15 @@ test('схема доводится по факту: нехватка колон
   assert.ok(columns.includes('boot_at'))
   healed.close()
   rmSync(dir, { recursive: true, force: true })
+})
+
+test('аудит отдаётся по маршруту админки с параметром limit', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-route' }) })
+  void created
+  store.writeAudit({ kind: 'exec', node: 1, mode: 'full', command: 'echo маршрут', at: Date.now() })
+  const { status, body } = adminApi.handleAdmin({ store, queue, config: CONFIG }, 'GET', '/audit?limit=5')
+  assert.equal(status, 200)
+  assert.ok(Array.isArray(body.audit), 'должен быть список событий')
+  assert.ok(body.audit.length >= 1)
+  assert.ok(body.audit.length <= 5)
 })
