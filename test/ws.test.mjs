@@ -328,3 +328,16 @@ test('сервер отвечает pong на прикладной ping с те�
   assert.equal(pong.id, 42, 'id должен вернуться тем же: клиент различает ответы по нему')
   socket.close()
 })
+
+test('approver=local по WebSocket не сбрасывается в none', async () => {
+  const { node, token } = await makeNode('approver-node')
+  // узел объявил session с методом approve
+  store.announce(node.id, [
+    { name: 'session', version: '6', methods: [{ method: 'approve', args: { type: 'object' } }] },
+  ])
+  const socket = await open(token)
+  socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0, approver: 'local' }))
+  await frame(socket, 'hello-ok')
+  assert.equal(store.node(node.id).approver, 'local', 'обещание должно сохраниться')
+  socket.close()
+})

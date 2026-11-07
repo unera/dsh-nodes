@@ -137,7 +137,10 @@ function modeBadge (label, mode, kind) {
   // нет данных — нет плашки: «base:—» и вопросительные знаки только мешают
   if (!mode) return null
   const text = MODE_TEXT[mode] ?? mode
-  const tone = { ro: 'ro', rw: 'rw', full: 'fa' }[mode] ?? null
+  const tone = {
+    ro: 'ro', rw: 'rw', full: 'fa',
+    'read-only': 'ro', 'workspace-write': 'rw', 'danger-full-access': 'fa',
+  }[mode] ?? null
   const explain = MODE_TITLE[mode] ?? String(mode)
   const hint = kind === 'base'
     ? `base: ${explain}. В этом режиме команда стартует.`
