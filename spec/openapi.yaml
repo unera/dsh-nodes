@@ -198,27 +198,6 @@ paths:
                         items: { type: string }
         "400": { $ref: "#/components/responses/Error" }
 
-  /v1/catalog:
-    get:
-      tags: [node]
-      summary: Catalog of every node's APIs
-      security: [{ nodeToken: [] }]
-      description: |
-        The client learns numeric API ids and method schemas here. Ids are
-        assigned by the server — never invent one.
-      responses:
-        "200":
-          description: the catalog
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  epoch: { type: integer }
-                  apis:
-                    type: array
-                    items: { $ref: "#/components/schemas/ApiDef" }
-
   /v1/state:
     get:
       tags: [node]

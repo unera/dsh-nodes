@@ -196,25 +196,6 @@ paths:
                         items: { type: string }
         "400": { $ref: "#/components/responses/Error" }
 
-  /v1/catalog:
-    get:
-      tags: [node]
-      summary: Справочник API всех узлов
-      security: [{ nodeToken: [] }]
-      description: По нему клиент узнаёт числовые номера API и методы с их схемами.
-      responses:
-        "200":
-          description: справочник
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  epoch: { type: integer }
-                  apis:
-                    type: array
-                    items: { $ref: "#/components/schemas/ApiDef" }
-
   /v1/state:
     get:
       tags: [node]
@@ -384,13 +365,15 @@ components:
       type: object
       required: [name, version, methods]
       properties:
-        id: { type: integer, description: номер API; выдают сервер, придумывать нельзя }
+        id:
+          type: integer
+          description: номер API выдаёт сервер; придумывать его нельзя
         name: { type: string }
         version:
           type: string
           description: |
-            Версия **контракта**, а не клиента. Меняешь схему методов — поднимай,
-            иначе узлы с разными схемами склеятся и сервер возьмёт схему первого.
+            Версия **контракта**, а не клиента. Меняется вместе со схемой любого
+            метода; узлы с разными версиями одного имени остаются раздельными.
         methods:
           type: array
           items: { $ref: "#/components/schemas/MethodDef" }
