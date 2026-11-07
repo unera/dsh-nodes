@@ -1,56 +1,59 @@
-# Клиентский протокол dsh-nodes.
+# Client protocol of dsh-nodes.
 #
-# Всё, что нужно новому клиенту (Android, Go, что угодно): регистрация узла,
-# объявление своих API, присутствие, выдача команд и результаты.
+# Everything a new client needs — Android, Go, anything — to talk to a DSH
+# server: register the node, announce its APIs, keep presence, fetch commands and
+# report results.
 #
-# Чего здесь нет и не должно быть:
-#  - админского API `/api/dsh-nodes/*` — оно приватное и ходит с сессией DSH;
-#  - контракта плагинов узла (`bash`, `session`) — это внутреннее дело клиента,
-#    сервер знает о методах только то, что клиент сам объявил в `announce`.
+# Deliberately absent:
+#  - the admin API under /api/dsh-nodes/* — private, behind the DSH session;
+#  - the contract of node-side plugins (shell, job, session) — the server only
+#    knows what a node announced in `announce`, and that is the point.
 openapi: 3.1.0
 
 info:
   title: dsh-nodes client API
   version: "1"
   description: |
-    Протокол связи узла с сервером DSH.
+    How a node talks to a DSH server.
 
-    Три вещи, которые меняются в поведении и потому описаны подробно:
+    Three behaviours deserve attention because a client that gets them wrong will
+    look like it works and then quietly lose commands.
 
-    **Команда выдаётся один раз.** `GET /v1/commands` берёт пачку с головы
-    очереди и сразу переводит её в `processing`. Повторной выдачи нет: «взял —
-    значит или исполнил, или пытался». Клиент, который упал, не увидит команду
-    снова, а сервер закроет её как `lost` после таймаута.
+    **A command is handed out once.** `GET /v1/commands` takes a batch from the
+    head of the queue and moves it to `processing`. There is no lease and no
+    redelivery: taken means either executed or attempted. A node that dies mid
+    command leaves it `processing`; the server closes it as `lost` after the
+    timeout so the model gets an answer instead of silence.
 
-    **Апрув — обычная команда.** Когда песочница отказала, сервер ставит на узел
-    команду `session.approve` с большим таймаутом. Модель при этом не ждёт:
-    она уже получила отказ.
+    **Approval is an ordinary command.** When the sandbox denies a command, the
+    server queues `session.approve` on the node with a long timeout and returns
+    the denial to the model at once — nothing waits.
 
-    **`approver: "local"` — обещание.** Узел, объявивший его, обязан
-    поддерживать метод `session.approve`. Сервер проверяет наличие метода в
-    объявлении и иначе считает `approver: "none"`.
+    **`approver: "local"` is a promise.** A node announcing it must implement
+    `session.approve`. The server checks the announcement and falls back to
+    `approver: "none"` if the method is missing.
 
 servers:
   - url: https://dsh.example.com/dsh-nodes
-    description: префикс задаётся настройкой плагина
+    description: prefix configured on the plugin; it can be any path
 
 tags:
   - name: enroll
-    description: как узел попадает на сервер
+    description: how a node gets onto the server
   - name: node
-    description: присутствие, объявление API, выдача команд
+    description: presence, API announcement, command delivery
   - name: presence
-    description: WebSocket для дешёвых уведомлений
+    description: WebSocket used only for cheap wake-ups
 
 paths:
   /v1/enroll:
     post:
       tags: [enroll]
-      summary: Заявка на подключение
+      summary: Request access
       description: |
-        Публичный маршрут. Клиент присылает свой `uuid` и `nonce`; `uuid` не
-        секрет (лежит в конфиге, светится в логах), а токен по заявке получит
-        только тот, кто знает `nonce`.
+        Public route. The client sends its `uuid` and a `nonce`; the uuid is not
+        a secret (it sits in config and shows up in logs), so the token is only
+        released to whoever knows the nonce.
       requestBody:
         required: true
         content:
@@ -66,18 +69,16 @@ paths:
                 name:
                   type: string
                   maxLength: 64
-                  description: желаемое имя узла; по умолчанию `node-<8 символов uuid>`
+                  description: preferred node name; defaults to `node-<first 8 of uuid>`
                 nonce:
                   type: string
                   maxLength: 200
-                  description: секрет клиента; без него токен не выдадут
-                proto:
-                  type: integer
-                clientVersion:
-                  type: string
+                  description: client secret; without it no token is issued
+                proto: { type: integer }
+                clientVersion: { type: string }
       responses:
         "202":
-          description: заявка принята или уже была
+          description: request accepted (or already existed)
           content:
             application/json:
               schema:
@@ -88,10 +89,11 @@ paths:
   /v1/enroll/{uuid}:
     get:
       tags: [enroll]
-      summary: Состояние заявки
+      summary: Poll a request
       description: |
-        Пока заявка ждёт владельца — `202 pending`. После одобрения — `200` с
-        токеном, **один раз**: повторная выдача только через админку.
+        While the owner has not decided the answer is `202 pending`. Once
+        approved, the token is returned **once**; a second delivery requires an
+        admin action.
       parameters:
         - name: uuid
           in: path
@@ -100,33 +102,30 @@ paths:
         - name: nonce
           in: query
           required: false
-          description: должен совпасть с тем, что прислан в заявке
+          description: must match the value sent with the request
           schema: { type: string }
       responses:
         "200":
-          description: заявка одобрена, токен выдан сейчас и больше не будет
+          description: approved; the token is in this response and nowhere else
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Enrolled"
         "202":
-          description: ждёт решения владельца
+          description: waiting for the owner
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EnrollStatus"
-        "403":
-          description: заявка отклонена или nonce не совпал
-        "404":
-          description: заявки нет
-        "409":
-          description: токен уже выдан
+        "403": { description: rejected, or the nonce did not match }
+        "404": { description: no such request }
+        "409": { description: the token was already handed out }
 
   /v1/pair:
     post:
       tags: [enroll]
-      summary: Обмен кода подключения на токен
-      description: Публичный маршрут для сценария «владелец показал код, клиент его ввёл».
+      summary: Exchange a pairing code for a token
+      description: Public route for "the owner shows a code, the client enters it".
       requestBody:
         required: true
         content:
@@ -135,7 +134,7 @@ paths:
               type: object
               required: [code]
               properties:
-                code: { type: string, description: код из ссылки }
+                code: { type: string, description: code from the pairing link }
                 name: { type: string, maxLength: 64 }
                 aliases:
                   type: array
@@ -146,27 +145,30 @@ paths:
                 clientVersion: { type: string }
       responses:
         "200":
-          description: узел создан, токен выдан
+          description: node created, token issued
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Enrolled"
         "404": { $ref: "#/components/responses/Error" }
-        "409": { description: код уже использован }
-        "410": { description: код истёк }
+        "409": { description: the code was already used }
+        "410": { description: the code expired }
 
   /v1/announce:
     put:
       tags: [node]
-      summary: Объявить свои API и политику
+      summary: Announce APIs and policy
       security: [{ nodeToken: [] }]
       description: |
-        Единственное место, где клиент рассказывает о себе: какие API держит, в
-        каком режиме работает, умеет ли спрашивать человека и сколько уже живёт.
+        The only place where a node describes itself: which APIs it holds, what
+        its ceiling is, whether it can ask a human and how long it has been
+        running.
 
-        Расхождение схем одного и того же API с другой версией не ошибка: сервер
-        вернёт предупреждения, а версии останутся раздельными. Меняешь схему —
-        поднимай версию, иначе узлы с разными схемами слипнутся.
+        Two nodes announcing the same API name with different schemas is not an
+        error: versions stay separate and the response lists warnings. Change a
+        schema — bump the version. The version is the **contract** version, not
+        the client version; fusing two contracts makes the server use whichever
+        schema it saw first.
       requestBody:
         required: true
         content:
@@ -175,7 +177,7 @@ paths:
               $ref: "#/components/schemas/Announce"
       responses:
         "200":
-          description: принято
+          description: accepted
           content:
             application/json:
               schema:
@@ -199,12 +201,14 @@ paths:
   /v1/catalog:
     get:
       tags: [node]
-      summary: Справочник API всех узлов
+      summary: Catalog of every node's APIs
       security: [{ nodeToken: [] }]
-      description: По нему клиент узнаёт числовые номера API и методы с их схемами.
+      description: |
+        The client learns numeric API ids and method schemas here. Ids are
+        assigned by the server — never invent one.
       responses:
         "200":
-          description: справочник
+          description: the catalog
           content:
             application/json:
               schema:
@@ -218,11 +222,11 @@ paths:
   /v1/state:
     get:
       tags: [node]
-      summary: Состояние узла и очереди
+      summary: Node and queue state
       security: [{ nodeToken: [] }]
       responses:
         "200":
-          description: состояние
+          description: state
           content:
             application/json:
               schema:
@@ -236,18 +240,28 @@ paths:
   /v1/commands:
     get:
       tags: [node]
-      summary: Взять команды на исполнение
+      summary: Take commands to execute
       security: [{ nodeToken: [] }]
       description: |
-        Берёт до `limit` команд **с головы** очереди среди `ready`, помечает их
-        `processing` и возвращает. Взятое больше не выдаётся никогда — ни этому
-        клиенту, ни другому.
+        Takes up to `limit` commands **from the head** of the queue among `ready`,
+        marks them `processing` and returns them. Taken commands are never handed
+        out again — not to this client, not to another one.
 
-        Если готовых команд нет, `cursor` не двигается и возвращается прежним:
-        он нужен клиенту только для самопроверки после реконнекта.
+        With nothing ready, `cursor` does not move and the previous value comes
+        back; it exists only so a client can sanity-check itself after a
+        reconnect.
 
-        `session.chdir` и `session.approve` приходят этим же маршрутом: это
-        обычные команды с методами внутреннего API `session`.
+        `session.chdir` and `session.approve` arrive through this same route:
+        they are ordinary commands carrying methods of the internal `session`
+        API.
+
+        Run independent commands of a batch in parallel if you like, but keep a
+        cap (the reference client uses 5): one model turn can produce a dozen
+        calls, and a node must not be flooded. `session.chdir` must be applied
+        first and in order — it changes the session working directory, so the
+        rest of the batch has to start in the new one. `session.approve` should
+        run outside the pool: a dialog may hang for a day and must not hold a
+        slot.
       parameters:
         - name: limit
           in: query
@@ -255,7 +269,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 5, default: 5 }
       responses:
         "200":
-          description: пачка команд
+          description: a batch of commands
           content:
             application/json:
               schema:
@@ -267,25 +281,26 @@ paths:
                   cursor:
                     type: integer
                     nullable: true
-                    description: максимум `seq` выданной пачки
+                    description: highest `seq` of the returned batch
                   ready:
                     type: integer
-                    description: сколько ещё ждёт выдачи
+                    description: how many commands are still waiting
                   epoch: { type: integer }
         "401": { $ref: "#/components/responses/Error" }
 
   /v1/commands/{seq}/result:
     post:
       tags: [node]
-      summary: Отчитаться об исполнении
+      summary: Report the outcome
       security: [{ nodeToken: [] }]
       description: |
-        Результат принимается и после того, как модель получила таймаут: команда
-        живёт до `timeout`, а ответ на уже закрытую даёт `409` (это нормально,
-        клиент его игнорирует).
+        Results are accepted after the model has already seen a timeout: a command
+        lives until its `timeout`, and answering for a closed one returns `409`,
+        which a client is expected to ignore.
 
-        В `results` последним блоком клиент кладёт JSON с кодом возврата и
-        отчётом песочницы — по нему сервер понимает, что это был отказ ядра.
+        The last block of `results` is a JSON object with the exit code and the
+        sandbox report; that is how the server learns the kernel denied something
+        rather than the command simply failing.
       parameters:
         - name: seq
           in: path
@@ -298,47 +313,48 @@ paths:
             schema:
               $ref: "#/components/schemas/Result"
       responses:
-        "200":
-          description: принято
-        "404":
-          description: такой команды нет
-        "409":
-          description: команда уже закрыта (поздний результат)
+        "200": { description: accepted }
+        "404": { description: no such command }
+        "409": { description: the command is already closed (late result) }
 
   /v1/ws:
     get:
       tags: [presence]
-      summary: WebSocket присутствия
+      summary: Presence WebSocket
       description: |
-        Апгрейд в WebSocket. Кадры — короткий JSON, трафик копеечный; данные
-        команд всегда едут HTTP-ом, здесь только сигналы.
+        Protocol upgrade. Frames are short JSON; command data always travels over
+        HTTP. The token goes in the `Sec-WebSocket-Protocol` header, never in the
+        URL — a URL ends up in proxy logs and browser history.
 
-        Клиент → сервер:
+        Client to server:
          - `{t:"hello", epoch, known, access, workdir, allowEscalation, approver, uptimeSeconds, boot}` —
-           первое сообщение; `epoch` из прошлого соединения позволяет серверу
-           сказать `reconnect: true`;
-         - `{t:"alive", known}` — «я жив, ждать нечего»; ответ — `state`, только
-           если есть работа;
+           the first frame; `epoch` from a previous connection lets the server
+           answer `reconnect: true`;
+         - `{t:"alive", known}` — "I am alive and idle"; the answer is `state`
+           only when there is work;
          - `{t:"pong"}`.
 
-        Сервер → клиент:
+        Server to client:
          - `{t:"hello-ok", epoch, state, reconnect}`;
-         - `{t:"state"}` — «есть команды, иди забирай»;
+         - `{t:"state"}` — "there are commands, go fetch them";
          - `{t:"ping"}`.
+
+        Without the socket a client still works, it just learns about work on the
+        next poll.
       responses:
         "101":
-          description: соединение перешло в WebSocket
+          description: switched to the WebSocket protocol
 
 components:
   securitySchemes:
     nodeToken:
       type: http
       scheme: bearer
-      description: токен узла, полученный при enroll или pair
+      description: node token obtained from enroll or pair
 
   responses:
     Error:
-      description: ошибка
+      description: error
       content:
         application/json:
           schema:
@@ -363,7 +379,7 @@ components:
     Enrolled:
       type: object
       properties:
-        token: { type: string, description: токен узла; показывается один раз }
+        token: { type: string, description: node token; issued once }
         node: { type: integer }
         alias: { type: string }
         aliases:
@@ -377,20 +393,22 @@ components:
         method: { type: string }
         args:
           type: object
-          description: JSON-схема аргументов; по ней сервер проверяет `data`
+          description: JSON schema of the arguments; the server validates `data` against it
         description: { type: string }
 
     ApiDef:
       type: object
       required: [name, version, methods]
       properties:
-        id: { type: integer, description: номер API; выдают сервер, придумывать нельзя }
+        id:
+          type: integer
+          description: server-assigned id; clients must not invent one
         name: { type: string }
         version:
           type: string
           description: |
-            Версия **контракта**, а не клиента. Меняешь схему методов — поднимай,
-            иначе узлы с разными схемами склеятся и сервер возьмёт схему первого.
+            **Contract** version. Bump it whenever the schema of any method
+            changes; nodes with different versions of the same name stay separate.
         methods:
           type: array
           items: { $ref: "#/components/schemas/MethodDef" }
@@ -408,40 +426,44 @@ components:
         access:
           type: string
           enum: [ro, rw, full]
-          description: потолок прав на этой машине; выставляет владелец узла
+          description: ceiling on this machine, set by the machine owner
         allowEscalation:
           type: boolean
-          description: устаревшее поле, оставлено для старых клиентов
+          description: deprecated, kept for older clients; prefer `approver`
         approver:
           type: string
           enum: [local, server, none]
           description: |
-            Кто отвечает на вопрос о повышении прав. `local` — человек за этой
-            машиной, и это обещание поддерживать `session.approve`: без метода
-            сервер объявление не примет и будет считать `none`.
+            Who may answer a question about a wider mode. `local` — the human at
+            this machine, and a promise to implement `session.approve`: without
+            that method the server refuses the promise and treats the node as
+            `none`. `server` — the human in the DSH dialog. `none` — never ask.
         workdir: { type: string }
         uptimeSeconds:
           type: number
           description: |
-            Сколько прошло с запуска процесса. Именно дельта, а не время старта:
-            часы клиента могут врать, сервер считает аптайм по своим.
+            Seconds since the process started — a delta, not a timestamp. Node
+            clocks drift or lie; the server converts the delta to its own clock at
+            the moment of the message and only adds its own time afterwards, so a
+            broken clock cannot produce a negative uptime.
 
     QueueState:
       type: object
       properties:
-        epoch: { type: integer, description: меняется при рестарте сервера }
-        state: { type: integer, description: последний выданный номер команды }
+        epoch: { type: integer, description: changes when the server restarts }
+        state: { type: integer, description: highest command number ever issued }
         served: { type: integer }
         cursor: { type: integer, nullable: true }
         queued: { type: integer }
-        ready: { type: integer }
-        waiting: { type: integer, description: сколько моделей ждёт результата }
+        ready: { type: integer, description: commands still waiting for a node }
+        waiting: { type: integer, description: models waiting for a result }
 
     SandboxFacts:
       type: object
       description: |
-        Отчёт клиента о том, как прошло исполнение. `mode` — фактический режим,
-        а не запрошенный: сервер верит этой цифре, а не своим ожиданиям.
+        The client's honest report of how the command ran. `mode` is the mode it
+        actually used, not the one requested — the server trusts this number over
+        its own expectations.
       properties:
         mode:
           type: string
@@ -451,20 +473,20 @@ components:
           enum: [none, bwrap]
         denied:
           type: boolean
-          description: ядро отвергло часть работы (запись вне разрешённого)
+          description: the kernel refused part of the work (a write outside the allowed roots)
         failed:
           type: boolean
-          description: команда завершилась кодом не 0
+          description: the command exited non-zero
         signature:
           type: string
           nullable: true
-          description: сигнатура отказа, например `read-only file system`
+          description: denial signature, e.g. `read-only file system`
         runnerFailure:
           type: boolean
-          description: сломалась сама песочница, а не команда
+          description: the sandbox itself failed, not the command
         escalation:
           type: integer
-          description: ступень эскалации, на которой выполнена команда
+          description: escalation step on which the command ran
 
     Command:
       type: object
@@ -472,13 +494,13 @@ components:
       properties:
         seq:
           type: integer
-          description: номер команды; по нему отправляется результат
-        api: { type: integer, description: номер API из справочника }
+          description: command number; results are posted against it
+        api: { type: integer, description: API id from the catalog }
         method: { type: string }
         args: { type: object }
         timeout:
           type: integer
-          description: секунды; по умолчанию 600
+          description: seconds; 600 by default
         sandbox:
           type: object
           properties:
@@ -486,32 +508,34 @@ components:
               type: string
               enum: [ro, rw, full]
             root: { type: string }
-          description: запрошенный режим, вычисленный на стороне сервера из политики сессии
+          description: |
+            Requested mode, computed by the server from the session policy. A node
+            clamps it by its own ceiling and starting mode.
         approved:
           type: string
           description: |
-            Идентификатор подтверждения. Ставит **только сервер**: если поле
-            пришло от модели, клиент его игнорирует. Команда с `approved` не
-            понижается стартовым режимом `base`, но всё равно ограничена `max`.
+            Approval id. Set by the **server only**: a client that sees this field
+            coming from a model must ignore it. An approved command is not lowered
+            by the node's starting mode, but is still bounded by its ceiling.
         escalation:
           type: integer
-          description: 0 — обычный запуск, 1 — после первого подтверждения, 2 — после второго
+          description: 0 for a plain run, 1 after the first approval, 2 after the second
         session:
           type: string
-          description: сессия модели; по ней клиент заводит рабочий каталог
+          description: model session; the client uses it to set up a per-session working directory
 
     Result:
       type: object
       required: [ok]
       properties:
         ok: { type: boolean }
-        code: { type: string, nullable: true, description: машинный код ошибки }
+        code: { type: string, nullable: true, description: machine-readable error code }
         message: { type: string, nullable: true }
         results:
           type: array
           description: |
-            Блоки результата. Последний блок, как правило, JSON с полями `code`,
-            `signal`, `cwd` и `sandbox` (см. SandboxFacts).
+            Result blocks. The last one is usually a JSON object with `code`,
+            `signal`, `cwd` and `sandbox` (see SandboxFacts).
           items:
             type: object
             properties:

@@ -1,0 +1,519 @@
+# Клиентский протокол dsh-nodes.
+#
+# Всё, что нужно новому клиенту (Android, Go, что угодно): регистрация узла,
+# объявление своих API, присутствие, выдача команд и результаты.
+#
+# Чего здесь нет и не должно быть:
+#  - админского API `/api/dsh-nodes/*` — оно приватное и ходит с сессией DSH;
+#  - контракта плагинов узла (`bash`, `session`) — это внутреннее дело клиента,
+#    сервер знает о методах только то, что клиент сам объявил в `announce`.
+openapi: 3.1.0
+
+info:
+  title: dsh-nodes client API
+  version: "1"
+  description: |
+    Протокол связи узла с сервером DSH.
+
+    Три вещи, которые меняются в поведении и потому описаны подробно:
+
+    **Команда выдаётся один раз.** `GET /v1/commands` берёт пачку с головы
+    очереди и сразу переводит её в `processing`. Повторной выдачи нет: «взял —
+    значит или исполнил, или пытался». Клиент, который упал, не увидит команду
+    снова, а сервер закроет её как `lost` после таймаута.
+
+    **Апрув — обычная команда.** Когда песочница отказала, сервер ставит на узел
+    команду `session.approve` с большим таймаутом. Модель при этом не ждёт:
+    она уже получила отказ.
+
+    **`approver: "local"` — обещание.** Узел, объявивший его, обязан
+    поддерживать метод `session.approve`. Сервер проверяет наличие метода в
+    объявлении и иначе считает `approver: "none"`.
+
+servers:
+  - url: https://dsh.example.com/dsh-nodes
+    description: префикс задаётся настройкой плагина
+
+tags:
+  - name: enroll
+    description: как узел попадает на сервер
+  - name: node
+    description: присутствие, объявление API, выдача команд
+  - name: presence
+    description: WebSocket для дешёвых уведомлений
+
+paths:
+  /v1/enroll:
+    post:
+      tags: [enroll]
+      summary: Заявка на подключение
+      description: |
+        Публичный маршрут. Клиент присылает свой `uuid` и `nonce`; `uuid` не
+        секрет (лежит в конфиге, светится в логах), а токен по заявке получит
+        только тот, кто знает `nonce`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uuid]
+              properties:
+                uuid:
+                  type: string
+                  minLength: 8
+                  maxLength: 64
+                name:
+                  type: string
+                  maxLength: 64
+                  description: желаемое имя узла; по умолчанию `node-<8 символов uuid>`
+                nonce:
+                  type: string
+                  maxLength: 200
+                  description: секрет клиента; без него токен не выдадут
+                proto:
+                  type: integer
+                clientVersion:
+                  type: string
+      responses:
+        "202":
+          description: заявка принята или уже была
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrollStatus"
+        "429":
+          $ref: "#/components/responses/Error"
+
+  /v1/enroll/{uuid}:
+    get:
+      tags: [enroll]
+      summary: Состояние заявки
+      description: |
+        Пока заявка ждёт владельца — `202 pending`. После одобрения — `200` с
+        токеном, **один раз**: повторная выдача только через админку.
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema: { type: string }
+        - name: nonce
+          in: query
+          required: false
+          description: должен совпасть с тем, что прислан в заявке
+          schema: { type: string }
+      responses:
+        "200":
+          description: заявка одобрена, токен выдан сейчас и больше не будет
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrolled"
+        "202":
+          description: ждёт решения владельца
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrollStatus"
+        "403":
+          description: заявка отклонена или nonce не совпал
+        "404":
+          description: заявки нет
+        "409":
+          description: токен уже выдан
+
+  /v1/pair:
+    post:
+      tags: [enroll]
+      summary: Обмен кода подключения на токен
+      description: Публичный маршрут для сценария «владелец показал код, клиент его ввёл».
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: код из ссылки }
+                name: { type: string, maxLength: 64 }
+                aliases:
+                  type: array
+                  maxItems: 8
+                  items: { type: string, maxLength: 64 }
+                uuid: { type: string }
+                proto: { type: integer }
+                clientVersion: { type: string }
+      responses:
+        "200":
+          description: узел создан, токен выдан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrolled"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: код уже использован }
+        "410": { description: код истёк }
+
+  /v1/announce:
+    put:
+      tags: [node]
+      summary: Объявить свои API и политику
+      security: [{ nodeToken: [] }]
+      description: |
+        Единственное место, где клиент рассказывает о себе: какие API держит, в
+        каком режиме работает, умеет ли спрашивать человека и сколько уже живёт.
+
+        Расхождение схем одного и того же API с другой версией не ошибка: сервер
+        вернёт предупреждения, а версии останутся раздельными. Меняешь схему —
+        поднимай версию, иначе узлы с разными схемами слипнутся.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Announce"
+      responses:
+        "200":
+          description: принято
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/QueueState"
+                  - type: object
+                    properties:
+                      apis:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            name: { type: string }
+                            version: { type: string, nullable: true }
+                      warnings:
+                        type: array
+                        items: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /v1/catalog:
+    get:
+      tags: [node]
+      summary: Справочник API всех узлов
+      security: [{ nodeToken: [] }]
+      description: По нему клиент узнаёт числовые номера API и методы с их схемами.
+      responses:
+        "200":
+          description: справочник
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epoch: { type: integer }
+                  apis:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiDef" }
+
+  /v1/state:
+    get:
+      tags: [node]
+      summary: Состояние узла и очереди
+      security: [{ nodeToken: [] }]
+      responses:
+        "200":
+          description: состояние
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/QueueState"
+                  - type: object
+                    properties:
+                      node: { type: integer }
+                      online: { type: boolean }
+
+  /v1/commands:
+    get:
+      tags: [node]
+      summary: Взять команды на исполнение
+      security: [{ nodeToken: [] }]
+      description: |
+        Берёт до `limit` команд **с головы** очереди среди `ready`, помечает их
+        `processing` и возвращает. Взятое больше не выдаётся никогда — ни этому
+        клиенту, ни другому.
+
+        Если готовых команд нет, `cursor` не двигается и возвращается прежним:
+        он нужен клиенту только для самопроверки после реконнекта.
+
+        `session.chdir` и `session.approve` приходят этим же маршрутом: это
+        обычные команды с методами внутреннего API `session`.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 5, default: 5 }
+      responses:
+        "200":
+          description: пачка команд
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commands:
+                    type: array
+                    items: { $ref: "#/components/schemas/Command" }
+                  cursor:
+                    type: integer
+                    nullable: true
+                    description: максимум `seq` выданной пачки
+                  ready:
+                    type: integer
+                    description: сколько ещё ждёт выдачи
+                  epoch: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/commands/{seq}/result:
+    post:
+      tags: [node]
+      summary: Отчитаться об исполнении
+      security: [{ nodeToken: [] }]
+      description: |
+        Результат принимается и после того, как модель получила таймаут: команда
+        живёт до `timeout`, а ответ на уже закрытую даёт `409` (это нормально,
+        клиент его игнорирует).
+
+        В `results` последним блоком клиент кладёт JSON с кодом возврата и
+        отчётом песочницы — по нему сервер понимает, что это был отказ ядра.
+      parameters:
+        - name: seq
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Result"
+      responses:
+        "200":
+          description: принято
+        "404":
+          description: такой команды нет
+        "409":
+          description: команда уже закрыта (поздний результат)
+
+  /v1/ws:
+    get:
+      tags: [presence]
+      summary: WebSocket присутствия
+      description: |
+        Апгрейд в WebSocket. Кадры — короткий JSON, трафик копеечный; данные
+        команд всегда едут HTTP-ом, здесь только сигналы.
+
+        Клиент → сервер:
+         - `{t:"hello", epoch, known, access, workdir, allowEscalation, approver, uptimeSeconds, boot}` —
+           первое сообщение; `epoch` из прошлого соединения позволяет серверу
+           сказать `reconnect: true`;
+         - `{t:"alive", known}` — «я жив, ждать нечего»; ответ — `state`, только
+           если есть работа;
+         - `{t:"pong"}`.
+
+        Сервер → клиент:
+         - `{t:"hello-ok", epoch, state, reconnect}`;
+         - `{t:"state"}` — «есть команды, иди забирай»;
+         - `{t:"ping"}`.
+      responses:
+        "101":
+          description: соединение перешло в WebSocket
+
+components:
+  securitySchemes:
+    nodeToken:
+      type: http
+      scheme: bearer
+      description: токен узла, полученный при enroll или pair
+
+  responses:
+    Error:
+      description: ошибка
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+
+    EnrollStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, rejected, handed]
+        uuid: { type: string }
+
+    Enrolled:
+      type: object
+      properties:
+        token: { type: string, description: токен узла; показывается один раз }
+        node: { type: integer }
+        alias: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+
+    MethodDef:
+      type: object
+      required: [method, args]
+      properties:
+        method: { type: string }
+        args:
+          type: object
+          description: JSON-схема аргументов; по ней сервер проверяет `data`
+        description: { type: string }
+
+    ApiDef:
+      type: object
+      required: [name, version, methods]
+      properties:
+        id: { type: integer, description: номер API; выдают сервер, придумывать нельзя }
+        name: { type: string }
+        version:
+          type: string
+          description: |
+            Версия **контракта**, а не клиента. Меняешь схему методов — поднимай,
+            иначе узлы с разными схемами склеятся и сервер возьмёт схему первого.
+        methods:
+          type: array
+          items: { $ref: "#/components/schemas/MethodDef" }
+
+    Announce:
+      type: object
+      required: [apis]
+      properties:
+        apis:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ApiDef" }
+        proto: { type: integer }
+        clientVersion: { type: string }
+        access:
+          type: string
+          enum: [ro, rw, full]
+          description: потолок прав на этой машине; выставляет владелец узла
+        allowEscalation:
+          type: boolean
+          description: устаревшее поле, оставлено для старых клиентов
+        approver:
+          type: string
+          enum: [local, server, none]
+          description: |
+            Кто отвечает на вопрос о повышении прав. `local` — человек за этой
+            машиной, и это обещание поддерживать `session.approve`: без метода
+            сервер объявление не примет и будет считать `none`.
+        workdir: { type: string }
+        uptimeSeconds:
+          type: number
+          description: |
+            Сколько прошло с запуска процесса. Именно дельта, а не время старта:
+            часы клиента могут врать, сервер считает аптайм по своим.
+
+    QueueState:
+      type: object
+      properties:
+        epoch: { type: integer, description: меняется при рестарте сервера }
+        state: { type: integer, description: последний выданный номер команды }
+        served: { type: integer }
+        cursor: { type: integer, nullable: true }
+        queued: { type: integer }
+        ready: { type: integer }
+        waiting: { type: integer, description: сколько моделей ждёт результата }
+
+    SandboxFacts:
+      type: object
+      description: |
+        Отчёт клиента о том, как прошло исполнение. `mode` — фактический режим,
+        а не запрошенный: сервер верит этой цифре, а не своим ожиданиям.
+      properties:
+        mode:
+          type: string
+          enum: [ro, rw, full]
+        enforcement:
+          type: string
+          enum: [none, bwrap]
+        denied:
+          type: boolean
+          description: ядро отвергло часть работы (запись вне разрешённого)
+        failed:
+          type: boolean
+          description: команда завершилась кодом не 0
+        signature:
+          type: string
+          nullable: true
+          description: сигнатура отказа, например `read-only file system`
+        runnerFailure:
+          type: boolean
+          description: сломалась сама песочница, а не команда
+        escalation:
+          type: integer
+          description: ступень эскалации, на которой выполнена команда
+
+    Command:
+      type: object
+      required: [seq, api, method, timeout]
+      properties:
+        seq:
+          type: integer
+          description: номер команды; по нему отправляется результат
+        api: { type: integer, description: номер API из справочника }
+        method: { type: string }
+        args: { type: object }
+        timeout:
+          type: integer
+          description: секунды; по умолчанию 600
+        sandbox:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [ro, rw, full]
+            root: { type: string }
+          description: запрошенный режим, вычисленный на стороне сервера из политики сессии
+        approved:
+          type: string
+          description: |
+            Идентификатор подтверждения. Ставит **только сервер**: если поле
+            пришло от модели, клиент его игнорирует. Команда с `approved` не
+            понижается стартовым режимом `base`, но всё равно ограничена `max`.
+        escalation:
+          type: integer
+          description: 0 — обычный запуск, 1 — после первого подтверждения, 2 — после второго
+        session:
+          type: string
+          description: сессия модели; по ней клиент заводит рабочий каталог
+
+    Result:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        code: { type: string, nullable: true, description: машинный код ошибки }
+        message: { type: string, nullable: true }
+        results:
+          type: array
+          description: |
+            Блоки результата. Последний блок, как правило, JSON с полями `code`,
+            `signal`, `cwd` и `sandbox` (см. SandboxFacts).
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [text] }
+              text: { type: string }

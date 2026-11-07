@@ -115,7 +115,9 @@ Node (Bearer): `PUT /v1/announce`, `GET /v1/catalog`, `GET /v1/state`,
 `GET /v1/commands`, `POST /v1/commands/{seq}/result`, `GET /v1/ws` (upgrade).
 Admin: `/api/dsh-nodes/*` — private, behind the DSH session.
 
-The client-facing protocol is described in [`spec/openapi.yaml`](spec/openapi.yaml).
+The client-facing protocol is in [`spec/openapi.yaml`](spec/openapi.yaml) (English, like
+this file); the Russian translation is kept in
+[`docs/openapi.ru.yaml`](docs/openapi.ru.yaml).
 The admin API is deliberately not in the spec: it is private and no third-party
 client should depend on it.
 
