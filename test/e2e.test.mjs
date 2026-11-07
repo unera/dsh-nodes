@@ -972,3 +972,19 @@ test('админка различает сокет и время последн�
   const second = withSocket.body.nodes.find((node) => node.id === nodeId)
   assert.equal(second.socket, true, 'сокет есть — флаг true')
 })
+
+test('остановленный клиент сразу перестаёт быть присоединённым', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'stopped' }) })
+  const nodeId = created.body.node.id
+  store.touch(nodeId)  // связь была только что: по времени узел ещё «живой»
+
+  const attached = adminApi.handleAdmin({ store, queue, config: CONFIG, presence: { online: (id) => id === nodeId } }, 'GET', '/nodes')
+  const first = attached.body.nodes.find((node) => node.id === nodeId)
+  assert.equal(first.attached, true)
+
+  // клиент остановили: сокета нет, но отметка времени свежая
+  const detached = adminApi.handleAdmin({ store, queue, config: CONFIG, presence: { online: () => false } }, 'GET', '/nodes')
+  const second = detached.body.nodes.find((node) => node.id === nodeId)
+  assert.equal(second.attached, false, 'присоединения нет сразу, без ожидания таймаута')
+  assert.equal(second.online, true, 'свежесть связи ещё держит прежний признак online')
+})

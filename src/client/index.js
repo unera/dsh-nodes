@@ -106,11 +106,24 @@ function uptimeText (seconds) {
  * серый, отсутствие связи — красный.
  */
 function pillState (node) {
-  if (!node.online) return 'off'
+  if (!pillOnline(node)) return 'off'
   const age = node.lastSeen ? Date.now() - node.lastSeen : Infinity
   if (age < 60_000) return 'on'
   if (age < 300_000) return 'stale'
   return 'cold'
+}
+
+/**
+ * Присоединён ли узел прямо сейчас.
+ *
+ * Если сервер умеет присутствие (поле `attached` есть), «online» означает
+ * именно открытый сокет: остановленный клиент перестаёт быть online сразу, а не
+ * через минуту. Поле `attached` может отсутствовать у старого сервера — тогда
+ * остаётся прежнее правило по времени последней связи.
+ */
+function pillOnline (node) {
+  if (typeof node.attached === 'boolean') return node.attached
+  return Boolean(node.online)
 }
 
 function ago (ms) {
@@ -216,7 +229,7 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
           // больше минуты, серый — больше пяти, красный — связи нет вовсе
           className: `pill ${pillState(node)}`,
           title: node.lastSeen ? `последняя связь: ${ago(node.lastSeen)} назад` : 'связи ещё не было',
-        }, node.online ? 'online' : 'offline'),
+        }, pillOnline(node) ? 'online' : 'offline'),
       ]),
       h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || 'без алиасов'),
       // аптайм отдельной строкой под именем: видно, работает ли узел с ночи или

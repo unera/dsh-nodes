@@ -90,11 +90,25 @@ export function apply (ctx, config) {
   } catch {
     logger = null
   }
+  /**
+   * Запись в журнал плагина.
+   *
+   * `ctx.logger` в некоторых сборках молчит (сервис есть, а вывода нет), и тогда
+   * разрывы сокета и перезапуски узлов не видны вообще нигде. Поэтому пишем ещё
+   * и в консоль — она уходит в journald с приоритетом, а молчащая диагностика
+   * хуже её отсутствия.
+   */
   const log = (level, message, extra) => {
+    const text = extra === undefined ? message : `${message} ${JSON.stringify(extra)}`
     const write = logger?.[level] ?? logger?.info
-    if (typeof write !== 'function') return
+    if (typeof write === 'function') {
+      try {
+        write.call(logger, text)
+      } catch {}
+    }
+    const priority = { debug: 7, info: 6, warn: 4, error: 3 }[level] ?? 6
     try {
-      write.call(logger, extra === undefined ? message : `${message} ${JSON.stringify(extra)}`)
+      process.stdout.write(`<${priority}>[dsh-nodes] ${text}\n`)
     } catch {}
   }
   log('info', `состояние: ${join(dir, 'dsh-nodes.sqlite')}, epoch ${epoch}`)
