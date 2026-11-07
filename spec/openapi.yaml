@@ -226,9 +226,8 @@ paths:
         marks them `processing` and returns them. Taken commands are never handed
         out again — not to this client, not to another one.
 
-        With nothing ready, `cursor` does not move and the previous value comes
-        back; it exists only so a client can sanity-check itself after a
-        reconnect.
+        With nothing ready the batch is empty and `ready` is zero; the client
+        should then wait for a `check_state` answer instead of polling.
 
         `session.chdir` and `session.approve` arrive through this same route:
         they are ordinary commands carrying methods of the internal `session`
@@ -252,19 +251,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  commands:
-                    type: array
-                    items: { $ref: "#/components/schemas/Command" }
-                  cursor:
-                    type: integer
-                    nullable: true
-                    description: highest `seq` of the returned batch
-                  ready:
-                    type: integer
-                    description: how many commands are still waiting
-                  epoch: { type: integer }
+                $ref: "#/components/schemas/CommandBatch"
         "401": { $ref: "#/components/responses/Error" }
 
   /v1/commands/{seq}/result:
@@ -357,18 +344,37 @@ components:
 
     EnrollStatus:
       type: object
+      description: |
+        State of an enrollment request. `pending` — the owner has not decided;
+        `approved` — a token will be issued on the next poll; `rejected` — the
+        owner said no, asking again needs a new request; `handed` — the token was
+        already delivered exactly once and will not be repeated.
       properties:
         status:
           type: string
           enum: [pending, approved, rejected, handed]
-        uuid: { type: string }
+        uuid:
+          type: string
+          description: client identity from the request; the same uuid keeps the same enrollment
 
     Enrolled:
       type: object
+      description: |
+        Successful enrollment or pairing. The token is shown here and nowhere
+        else: store it, because a second delivery requires an admin action on the
+        server.
       properties:
-        token: { type: string, description: node token; issued once }
-        node: { type: integer }
-        alias: { type: string }
+        token:
+          type: string
+          description: bearer token for every node call; treat it as a secret
+        node:
+          type: integer
+          description: numeric node id, for logs and admin correlation only — calls address nodes by alias
+        alias:
+          type: string
+          description: |
+            Primary name of the node: the one to use in `nodes_call`. Assigned by
+            the server, unique, and safe to show to a human.
         aliases:
           type: array
           items: { type: string }
@@ -376,12 +382,24 @@ components:
     MethodDef:
       type: object
       required: [method, args]
+      description: |
+        One method of a node-side API, as the node announced it. The server
+        validates every call against `args` before anything reaches the node, so
+        a schema that lies produces confusing `bad_args` errors rather than bad
+        execution — be precise.
       properties:
-        method: { type: string }
+        method:
+          type: string
+          description: method name inside the API, e.g. `exec` or `chdir`
         args:
           type: object
-          description: JSON schema of the arguments; the server validates `data` against it
-        description: { type: string }
+          description: |
+            JSON schema of the arguments. Required: a method without a schema is
+            rejected at announce time, because the server would have nothing to
+            validate against.
+        description:
+          type: string
+          description: one line for the model; shown in the catalog
 
     ApiDef:
       type: object
@@ -436,14 +454,36 @@ components:
 
     QueueState:
       type: object
+      description: |
+        How much work the queue holds for one node. Sent in `announce`,
+        `GET /v1/state` and every command batch, so a client can decide whether a
+        fetch is worth making without asking twice.
       properties:
-        epoch: { type: integer, description: changes when the server restarts }
-        state: { type: integer, description: highest command number ever issued }
-        served: { type: integer }
-        cursor: { type: integer, nullable: true }
-        queued: { type: integer }
-        ready: { type: integer, description: commands still waiting for a node }
-        waiting: { type: integer, description: models waiting for a result }
+        epoch:
+          type: integer
+          description: |
+            Server generation: it changes on every server restart. A client that
+            reconnects with a stale epoch learns that its previous state belongs
+            to another life of the server.
+        state:
+          type: integer
+          description: |
+            Number of the last command ever queued for this node. The client
+            compares it with what it already knows (`check_state`) to find out
+            whether it is behind. It is not a delivery watermark: a command
+            counted here may already be executing.
+        queued:
+          type: integer
+          description: commands held in the queue for this node, including the ones being executed
+        ready:
+          type: integer
+          description: commands that have not been handed out yet and will come on the next fetch
+        waiting:
+          type: integer
+          description: |
+            Models currently blocked on a result from this node. Useful when
+            reading a journal: a non-zero value with no traffic means somebody is
+            waiting and the node is silent.
 
     SandboxFacts:
       type: object
@@ -474,6 +514,127 @@ components:
         escalation:
           type: integer
           description: escalation step on which the command ran
+
+    CommandBatch:
+      type: object
+      description: |
+        What one `GET /v1/commands` call returns. The commands are already marked
+        as being executed: another fetch will not return them, and neither will a
+        fetch from a different client of the same node.
+      properties:
+        commands:
+          type: array
+          description: commands to execute now, oldest first
+          items: { $ref: "#/components/schemas/Command" }
+        ready:
+          type: integer
+          description: |
+            How many commands are still waiting after this batch. A non-zero value
+            means the client may fetch again immediately instead of waiting for a
+            notification.
+        epoch:
+          type: integer
+          description: server generation, so a stale client notices it reconnected
+
+    PingReply:
+      type: object
+      description: |
+        Reply of a node to the `ping` method of its internal `session` API — the
+        cheap check "is this node alive and how far away is it".
+
+        The node fills what only it can know: its own clock and how long it has
+        been running. The round-trip time it cannot compute: that needs the
+        server's clock, which the node has never seen. So the field `rttMs` is
+        declared here and sent as `null`; the server fills it in place before the
+        answer reaches the model, together with `clockSkewMs`.
+
+        Reading the numbers: `rttMs` covers queueing plus network plus execution,
+        so on a loaded server it is larger than a network ping. `clockSkewMs` is
+        the node clock offset; on a slow round trip it grows by half of the extra
+        time, so compare clocks using the smallest values of a series, not one
+        measurement.
+      properties:
+        pong:
+          type: number
+          description: node wall clock at the moment of answering, milliseconds with fractions
+        rttMs:
+          type: number
+          nullable: true
+          description: round trip measured by the server; the node always sends `null`
+        clockSkewMs:
+          type: number
+          description: how far the node clock is ahead of the server, in milliseconds
+        sentAt:
+          type: number
+          nullable: true
+          description: |
+            The server timestamp echoed back (`issuedAt` of the command). Absent
+            on nodes that predate timing support; then `rttMs` stays `null`.
+        upSeconds:
+          type: integer
+          description: seconds since the node client process started; a delta, not a timestamp
+        platform:
+          type: string
+          description: node platform, e.g. `linux`
+        version:
+          type: string
+          description: client version, e.g. `dshnc/0.0.51`
+
+    CheckStateFrame:
+      type: object
+      description: |
+        Client to server, the only frame an idle node sends. It carries three
+        meanings at once, because for a polling-free client they always coincide:
+        "I am alive", "I know commands up to `known`", and "I am free, tell me if
+        there is work".
+
+        The server answers with `{t:"state", state:N}` only when `N > known`,
+        otherwise it stays silent and remembers that the node is waiting, so the
+        answer comes later, pushed by the new command. This is the whole reason
+        there is no periodic polling.
+      required: [t, known]
+      properties:
+        t: { type: string, enum: [check_state] }
+        known:
+          type: integer
+          nullable: true
+          description: |
+            Highest command number the client has seen. `null` means the client
+            lost its state, i.e. it restarted: the server answers at once and
+            closes every command it had handed to this node with `node_restarted`,
+            so the model learns the result is gone instead of waiting out its
+            timeout.
+
+    StateFrame:
+      type: object
+      description: |
+        Server to client: "you are behind, fetch commands". Carries the number so
+        the client can tell how far behind without an extra request.
+      required: [t, state]
+      properties:
+        t: { type: string, enum: [state] }
+        state:
+          type: integer
+          description: number of the last command queued for this node
+        epoch:
+          type: integer
+          description: server generation; a change means the server restarted
+
+    PingFrame:
+      type: object
+      description: |
+        Application-level liveness check over the socket. The client pings after
+        `pingInterval` of silence, stretching the pause up to
+        `maxPingIntervalFactor` times when the server has not sent commands for a
+        while. No answer within the interval means the connection is dead: the
+        client drops it and reconnects. The server may ping the client too, but
+        that direction is off by default.
+      required: [t, id]
+      properties:
+        t: { type: string, enum: [ping] }
+        id:
+          type: integer
+          description: sequence number chosen by the sender; the reply must carry the same one
 
     Command:
       type: object
@@ -513,6 +674,11 @@ components:
 
     Result:
       type: object
+      description: |
+        Outcome of one command. `ok: false` is a normal answer, not a transport
+        failure: the command may have failed to start, timed out, or been refused
+        by the sandbox. Machine-readable detail goes into `results`, which the
+        model reads like any other tool output.
       required: [ok]
       properties:
         ok: { type: boolean }

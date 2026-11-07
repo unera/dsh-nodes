@@ -540,23 +540,21 @@ test('аргумент sandbox переводится в словарь DSH: ro 
   }
 })
 
-test('взятая команда не выдаётся второй раз, курсор идёт по пачке', () => {
+test('взятая команда не выдаётся второй раз', () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 50 })
   const nodeId = 4242
   for (let i = 0; i < 3; i++) queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i } })
 
   const first = queue.take(nodeId, { limit: 2 })
   assert.equal(first.commands.length, 2)
-  assert.equal(first.cursor, first.commands[1].seq, 'курсор — максимум пачки')
   assert.equal(first.ready, 1, 'третья команда осталась ждать')
 
   const second = queue.take(nodeId, { limit: 5 })
   assert.equal(second.commands.length, 1, 'первая пачка повторно не выдаётся')
-  assert.equal(second.cursor, second.commands[0].seq)
 
   const third = queue.take(nodeId, { limit: 5 })
   assert.equal(third.commands.length, 0)
-  assert.equal(third.cursor, second.cursor, 'без готовых курсор не двигается')
+  assert.equal(third.ready, 0)
 })
 
 test('взятая команда без ответа закрывается как lost, а не висит вечно', async () => {
