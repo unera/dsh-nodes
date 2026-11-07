@@ -31,7 +31,7 @@ export const name = 'dsh-nodes'
 // `Error: cannot get property "connection" without inject` и плагин не поднимется.
 // Каждый сервис, к которому обращаемся напрямую, обязан быть здесь: cordis
 // бросает «cannot get property X without inject». На этом мы попадались трижды.
-export const inject = { systemPrompt: null, tools: null, webServer: null, connection: null, sandboxPolicy: null }
+export const inject = { systemPrompt: null, tools: null, webServer: null, connection: null, sandboxPolicy: null, workingDirectory: null }
 
 /** Конфиг плагина (план §10). */
 export const Config = z.object({
@@ -189,6 +189,14 @@ export function apply (ctx, config) {
     // бросит «cannot get property "approval" without inject». Через get — можно,
     // и в хосте без апрувов плагин остаётся живым.
     approval: typeof ctx.get === 'function' ? ctx.get('approval') : null,
+    // каталог сессии: им пользуется копирование как умолчанием для `self`
+    sessionDir: async (execution) => {
+      try {
+        return execution?.agent ? await ctx.workingDirectory.ensure(execution.agent, execution?.signal) : null
+      } catch {
+        return null
+      }
+    },
   })
 
   let unregister = []
