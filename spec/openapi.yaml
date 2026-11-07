@@ -443,6 +443,14 @@ components:
             this machine, and a promise to implement `session.approve`: without
             that method the server refuses the promise and treats the node as
             `none`. `server` — the human in the DSH dialog. `none` — never ask.
+        base:
+          type: string
+          enum: [ro, rw, full]
+          description: |
+            Mode a command starts in. It may be narrower than `access` (the
+            ceiling): then widening needs a human decision, either after a denial
+            or up front through `sandboxStrict`. Confirmed commands are not
+            lowered by it.
         workdir: { type: string }
         uptimeSeconds:
           type: number
@@ -643,7 +651,7 @@ components:
         seq:
           type: integer
           description: command number; results are posted against it
-        api: { type: integer, description: API id from the catalog }
+        api: { type: integer, description: API id from this node's `announce` answer }
         method: { type: string }
         args: { type: object }
         timeout:
@@ -668,6 +676,13 @@ components:
         escalation:
           type: integer
           description: 0 for a plain run, 1 after the first approval, 2 after the second
+        issuedAt:
+          type: number
+          description: |
+            Server timestamp, milliseconds with fractions, taken when the command
+            was queued. The node echoes it back in `ping`, and the server derives
+            `rttMs` and the clock offset from it; it is also the only way for a
+            node to know how long the command waited in the queue.
         session:
           type: string
           description: model session; the client uses it to set up a per-session working directory
