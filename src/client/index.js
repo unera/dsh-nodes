@@ -114,66 +114,36 @@ function uptimeText (seconds) {
  * серый, отсутствие связи — красный.
  */
 /** Как режим DSH называется человеку. */
-const MODE_TEXT = {
-  'read-only': 'ro',
-  'workspace-write': 'rw',
-  'danger-full-access': 'FA',
-  ro: 'ro',
-  rw: 'rw',
-  full: 'FA',
+/** Как режим называется человеку: короткое имя и объяснение из словаря. */
+const MODE_SHORT = {
+  'read-only': 'ro', 'workspace-write': 'rw', 'danger-full-access': 'FA',
+  ro: 'ro', rw: 'rw', full: 'FA',
 }
 
-const MODE_TITLE = {
-  'read-only': 'ro — только чтение (read-only)',
-  'workspace-write': 'rw — запись только внутри разрешённых каталогов (workspace-write)',
-  'danger-full-access': 'FA — без песочницы: полный доступ (danger-full-access)',
-  ro: 'ro — только чтение (read-only)',
-  rw: 'rw — запись только внутри разрешённых каталогов (workspace-write)',
-  full: 'FA — без песочницы: полный доступ (danger-full-access)',
+const MODE_KEY = {
+  'read-only': 'mode.ro', 'workspace-write': 'mode.rw', 'danger-full-access': 'mode.fa',
+  ro: 'mode.ro', rw: 'mode.rw', full: 'mode.fa',
 }
 
-/**
- * Плашка режима: `base` — с чего команда стартует, `upto` — докуда её можно
- * поднять с подтверждением.
- */
+/** Плашка режима: `base` — с чего команда стартует, `upto` — докуда поднимается. */
 function modeBadge (label, mode, kind) {
-  // нет данных — нет плашки: «base:—» и вопросительные знаки только мешают
   if (!mode) return null
-  const text = MODE_TEXT[mode] ?? mode
-  const tone = {
-    ro: 'ro', rw: 'rw', full: 'fa',
-    'read-only': 'ro', 'workspace-write': 'rw', 'danger-full-access': 'fa',
-  }[mode] ?? null
-  const explain = MODE_TITLE[mode] ?? String(mode)
-  const hint = kind === 'base'
-    ? `base: ${explain}. В этом режиме команда стартует.`
-    : `upto: ${explain}. Потолок узла: выше не поднимется даже с подтверждением.`
+  const text = MODE_SHORT[mode] ?? mode
+  const tone = { ro: 'ro', rw: 'rw', full: 'fa', 'read-only': 'ro', 'workspace-write': 'rw', 'danger-full-access': 'fa' }[mode] ?? null
+  const explain = t(MODE_KEY[mode] ?? String(mode))
+  const hint = kind === 'base' ? t('mode.baseHint', { explain }) : t('mode.uptoHint', { explain })
   return h('span', { key: label, className: `badge ${tone ?? ''}`, title: hint }, `${label}:${text}`)
 }
 
-/**
- * Значок того, кто отвечает на вопрос о расширении прав.
- *
- * web — человек в DSH (диалог приходит в GUI), local — человек за этой машиной
- * (вопрос всплывает на узле, например окном zenity), none — не спрашиваем никого.
- */
+/** Значок того, кто отвечает на вопрос о расширении прав. */
 function approverBadge (approver) {
   const view = {
-    server: { glyph: '🌐', hint: 'web: спрашивает человек в DSH — вопрос приходит в GUI' },
-    local: { glyph: '💻', hint: 'local: спрашивает человек за этой машиной — вопрос всплывает на узле (zenity и подобное)' },
-    none: { glyph: '∅', hint: 'none: вопросы выключены — отказ песочницы окончательный' },
+    server: { glyph: '🌐', key: 'approver.web' },
+    local: { glyph: '💻', key: 'approver.local' },
+    none: { glyph: '∅', key: 'approver.none' },
   }[approver]
-  // узел не объявил — плашки нет, а не «?»
   if (!view) return null
-  return h('span', { key: 'approver', className: 'badge', title: view.hint }, view.glyph)
-}
-
-/** Строка таблицы «что — как». */
-function row (what, value) {
-  return h('tr', { key: what }, [
-    h('td', { key: 'w', className: 'muted' }, what),
-    h('td', { key: 'v' }, h('code', null, String(value))),
-  ])
+  return h('span', { key: 'approver', className: 'badge', title: t(view.key) }, view.glyph)
 }
 
 function pillState (node) {
@@ -198,7 +168,7 @@ function pillOnline (node) {
 }
 
 function ago (ms) {
-  if (!ms) return 'никогда'
+  if (!ms) return t('pill.never')
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
   if (s < 60) return `${s}с`
   if (s < 3600) return `${Math.round(s / 60)}м`
@@ -258,10 +228,10 @@ function NodeEditor ({ node, busy, error, onSave, onCancel }) {
   return h('div', { className: 'editor' }, [
     h('div', { key: 'title', className: 'row' }, [
       h('strong', { key: 't' }, `Узел ${node.id}`),
-      h('span', { key: 'n', className: 'muted' }, 'правка имени и алиасов'),
+      h('span', { key: 'n', className: 'muted' }, t('nodes.edit')),
     ]),
     h('div', { key: 'name' }, [
-      h('label', { key: 'l' }, 'Имя узла'),
+      h('label', { key: 'l' }, t('nodes.title')),
       h('input', {
         key: 'i',
         value: name,
@@ -270,7 +240,7 @@ function NodeEditor ({ node, busy, error, onSave, onCancel }) {
       }),
     ]),
     h('div', { key: 'aliases' }, [
-      h('label', { key: 'l' }, 'Алиасы через запятую (по любому из них узел можно позвать)'),
+      h('label', { key: 'l' }, t('nodes.aliasesPlaceholder')),
       h('textarea', {
         key: 't',
         rows: 2,
@@ -282,8 +252,8 @@ function NodeEditor ({ node, busy, error, onSave, onCancel }) {
       ? h('div', { key: 'error', className: 'msg bad', style: { minHeight: 0 } }, error)
       : null,
     h('div', { key: 'actions', className: 'row' }, [
-      h('button', { key: 'save', className: 'primary', disabled: busy || !name.trim(), onClick: submit }, 'сохранить'),
-      h('button', { key: 'cancel', disabled: busy, onClick: onCancel }, 'отмена'),
+      h('button', { key: 'save', className: 'primary', disabled: busy || !name.trim(), onClick: submit }, t('nodes.save')),
+      h('button', { key: 'cancel', disabled: busy, onClick: onCancel }, t('nodes.cancel')),
     ]),
   ])
 }
@@ -299,14 +269,14 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
           // цвет плашки говорит о свежести связи: зелёный — только что, синий —
           // больше минуты, серый — больше пяти, красный — связи нет вовсе
           className: `pill ${pillState(node)}`,
-          title: node.lastSeen ? `последняя связь: ${ago(node.lastSeen)} назад` : 'связи ещё не было',
-        }, pillOnline(node) ? 'online' : 'offline'),
+          title: node.lastSeen ? t('pill.lastSeen', { ago: ago(node.lastSeen) }) : t('pill.noContact'),
+        }, pillOnline(node) ? t('pill.online') : t('pill.offline')),
       ]),
-      h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || 'без алиасов'),
+      h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || t('nodes.noAliases')),
       // аптайм отдельной строкой под именем: видно, работает ли узел с ночи или
       // только что перезапустился
       node.online && uptimeText(node.uptimeSeconds)
-        ? h('div', { key: 'u', className: 'muted', style: { fontSize: 12, marginTop: 2 } }, `работает ${uptimeText(node.uptimeSeconds)}`)
+        ? h('div', { key: 'u', className: 'muted', style: { fontSize: 12, marginTop: 2 } }, t('pill.working', { uptime: uptimeText(node.uptimeSeconds) }))
         : null,
     ]),
     h('td', { key: 'apis' }, h('div', { className: 'chips' },
@@ -322,9 +292,9 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
       node.clientVersion ? h('div', { key: 'v', className: 'muted', style: { fontSize: 12 } }, node.clientVersion) : null,
     ]),
     h('td', { key: 'actions' }, h('div', { className: 'actions' }, [
-      h(GlyphButton, { key: 'e', kind: 'edit', title: 'Редактировать', disabled: busy, onClick: () => onEdit(node.id) }),
-      h(GlyphButton, { key: 't', kind: 'unplug', title: 'Отозвать токен', disabled: busy, onClick: () => onRevoke(node.id) }),
-      h(GlyphButton, { key: 'd', kind: 'trash', title: 'Удалить', disabled: busy, className: 'danger', onClick: () => onDelete(node.id) }),
+      h(GlyphButton, { key: 'e', kind: 'edit', title: t('nodes.editTitle'), disabled: busy, onClick: () => onEdit(node.id) }),
+      h(GlyphButton, { key: 't', kind: 'unplug', title: t('nodes.revoke'), disabled: busy, onClick: () => onRevoke(node.id) }),
+      h(GlyphButton, { key: 'd', kind: 'trash', title: t('nodes.delete'), disabled: busy, className: 'danger', onClick: () => onDelete(node.id) }),
     ])),
   ])
 }
@@ -432,18 +402,18 @@ function NodesPanel () {
     onScroll: () => setTip(null),
   }, [
     h('div', { key: 'msg', className: `msg ${message.kind}` },
-      message.text || (epoch != null ? `epoch ${epoch}, устройств ${nodes.length}` : '')),
+      message.text || (epoch != null ? t('summary.epoch', { epoch, count: nodes.length }) : '')),
     // Панель разбита на вкладки: подключения — то, с чего начинают, аудит —
     // то, куда смотрят редко, настройки — то, что меняют один раз.
     h('div', { key: 'tabs', className: 'tabs' }, [
-      tabButton('connections', 'Подключения'),
-      tabButton('audit', 'Аудит'),
-      tabButton('settings', 'Общие настройки'),
+      tabButton('connections', t('tab.connections')),
+      tabButton('audit', t('tab.audit')),
+      tabButton('settings', t('tab.settings')),
     ]),
     secret ? h('div', { key: 'secret', className: 'secret' }, `токен (показывается один раз): ${secret}`) : null,
 
     h('section', { key: 'pair', style: only('connections') }, [
-      h('h3', { key: 'h' }, 'Подключить клиента'),
+      h('h3', { key: 'h' }, t('pair.title')),
       h('div', { key: 'r', className: 'row' }, [
         h('input', { key: 'ttl', type: 'number', value: ttl, style: { width: 90 }, onChange: (e) => setTtl(Number(e.target.value) || 600) }),
         h('button', {
@@ -454,25 +424,25 @@ function NodesPanel () {
             try {
               const result = await op({ op: 'pair', body: { ttlSeconds: ttl } })
               setLink(result.url)
-              say('ссылка готова', 'good')
+              say(t('pair.ready'), 'good')
             } catch (error) { say(error.message, 'bad') }
           },
-        }, 'сгенерировать ссылку'),
-        h('span', { key: 't', className: 'muted' }, 'секунды жизни ссылки'),
+        }, t('pair.make')),
+        h('span', { key: 't', className: 'muted' }, t('pair.ttl')),
       ]),
       link ? h('div', { key: 'l', className: 'secret' }, link) : null,
       h('div', { key: 'hint', className: 'muted', style: { fontSize: 12, marginTop: 6 } },
-        'На узле: dshnc connect <ссылка>. Подтверждать здесь ничего не нужно, код одноразовый.'),
+        t('pair.note')),
     ]),
 
     h('section', { key: 'pending', style: only('connections') }, [
       h('h3', { key: 'h' }, `Заявки без кода (${pending.length})`),
       pending.length === 0
-        ? h('div', { key: 'e', className: 'empty' }, 'нет')
+        ? h('div', { key: 'e', className: 'empty' }, t('nodes.none'))
         : h('table', { key: 't' }, [
           h('thead', { key: 'head' }, h('tr', null, [
-            h('th', { key: 'n' }, 'имя'), h('th', { key: 'i' }, 'id'), h('th', { key: 'a' }, 'адрес'),
-            h('th', { key: 'w' }, 'висит'), h('th', { key: 'x' }, ''),
+            h('th', { key: 'n' }, t('nodes.name')), h('th', { key: 'i' }, 'id'), h('th', { key: 'a' }, t('pending.title')),
+            h('th', { key: 'w' }, t('state.hung')), h('th', { key: 'x' }, ''),
           ])),
           h('tbody', { key: 'body' }, pending.map((row) => h('tr', { key: row.uuid }, [
             h('td', { key: 'n' }, row.name),
@@ -480,8 +450,8 @@ function NodesPanel () {
             h('td', { key: 'a' }, row.ip ?? '—'),
             h('td', { key: 'w' }, `${row.waiting} с`),
             h('td', { key: 'x' }, h('div', { className: 'row' }, [
-              h('button', { key: 'y', className: 'primary', disabled: busy, onClick: () => run({ op: 'approve', id: row.uuid }, 'допущен') }, 'допустить'),
-              h('button', { key: 'r', className: 'danger', disabled: busy, onClick: () => run({ op: 'reject', id: row.uuid }, 'отклонён') }, 'отклонить'),
+              h('button', { key: 'y', className: 'primary', disabled: busy, onClick: () => run({ op: 'approve', id: row.uuid }, t('pending.allowed')) }, t('pending.allow')),
+              h('button', { key: 'r', className: 'danger', disabled: busy, onClick: () => run({ op: 'reject', id: row.uuid }, t('pending.denied')) }, t('pending.deny')),
             ])),
           ]))),
         ]),
@@ -490,11 +460,11 @@ function NodesPanel () {
     h('section', { key: 'nodes', style: only('connections') }, [
       h('h3', { key: 'h' }, `Устройства (${nodes.length})`),
       nodes.length === 0
-        ? h('div', { key: 'e', className: 'empty' }, 'нет')
+        ? h('div', { key: 'e', className: 'empty' }, t('nodes.none'))
         : h('table', { key: 't' }, [
           h('thead', { key: 'head' }, h('tr', null, [
-            h('th', { key: 'i' }, 'id'), h('th', { key: 'n' }, 'имя / алиасы'),
-            h('th', { key: 'a' }, 'API'), h('th', { key: 'd' }, 'доступ'), h('th', { key: 'x' }, ''),
+            h('th', { key: 'i' }, 'id'), h('th', { key: 'n' }, t('nodes.name')),
+            h('th', { key: 'a' }, 'API'), h('th', { key: 'd' }, t('nodes.access')), h('th', { key: 'x' }, ''),
           ])),
           h('tbody', { key: 'body' }, nodes.flatMap((node) => {
             const row = h(NodeRow, {
@@ -508,12 +478,12 @@ function NodesPanel () {
             onRevoke: (id) => {
               if (typeof window !== 'undefined' && !window.confirm(`Отозвать токен узла ${id}? Текущий перестанет работать сразу.`)) return
               setSecret(null)
-              run({ op: 'token', id }, 'токен перевыпущен')
+              run({ op: 'token', id }, t('nodes.tokenReissued'))
             },
               onDelete: (id) => {
                 if (typeof window !== 'undefined' && !window.confirm(`Удалить узел ${id}?`)) return
                 if (editing === id) setEditing(null)
-                run({ op: 'delete', id }, 'удалён')
+                run({ op: 'delete', id }, t('nodes.deleted'))
               },
             })
             // форма живёт прямо над своей строкой: не нужно листать к верху панели
@@ -533,7 +503,7 @@ function NodesPanel () {
                     setEditorError(`Имя «${body.name}» уже занято узлом ${taken.id} (${taken.name})`)
                     return
                   }
-                  const result = await run({ op: 'update', id, body }, 'сохранено')
+                  const result = await run({ op: 'update', id, body }, t('nodes.saved'))
                   if (result.ok) { setEditorError(''); setEditing(null) }
                   else setEditorError(result.error)
                 },
@@ -553,21 +523,21 @@ function NodesPanel () {
       : null,
 
     h('section', { key: 'audit', style: only('audit') }, [
-      h('h3', { key: 'h' }, 'Аудит (последние события)'),
+      h('h3', { key: 'h' }, t('audit.title')),
       audit.length === 0
-        ? h('div', { key: 'e', className: 'empty' }, 'пока пусто')
+        ? h('div', { key: 'e', className: 'empty' }, t('audit.empty'))
         : h('table', { key: 't' }, [
           h('thead', { key: 'head' }, h('tr', null, [
-            h('th', { key: 'w' }, 'когда'), h('th', { key: 'k' }, 'что'),
-            h('th', { key: 'n' }, 'узел'), h('th', { key: 'm' }, 'режим'), h('th', { key: 'c' }, 'команда'),
+            h('th', { key: 'w' }, t('audit.when')), h('th', { key: 'k' }, t('audit.what')),
+            h('th', { key: 'n' }, t('audit.node')), h('th', { key: 'm' }, t('audit.mode')), h('th', { key: 'c' }, t('audit.command')),
           ])),
           h('tbody', { key: 'body' }, audit.map((row) => h('tr', { key: row.id }, [
             h('td', { key: 'w', className: 'muted' }, new Date(row.at).toLocaleTimeString()),
             h('td', { key: 'k' }, row.kind === 'denied'
-              ? h('span', { style: { color: '#ef4444' } }, 'отказ')
+              ? h('span', { style: { color: '#ef4444' } }, t('audit.denied'))
               : row.kind === 'approve'
-                ? `${row.outcome === 'approved' ? 'разрешил' : 'запретил'}`
-                : 'исполнено'),
+                ? `${row.outcome === 'approved' ? t('audit.approved') : t('audit.rejected')}`
+                : t('audit.exec')),
             h('td', { key: 'n' }, row.nodeName
               ? [row.nodeName, h('span', { key: 'id', className: 'muted' }, ` #${row.node}`)]
               : '—'),
@@ -578,36 +548,35 @@ function NodesPanel () {
     ]),
 
     h('section', { key: 'create', style: only('connections') }, [
-      h('h3', { key: 'h' }, 'Новый узел вручную'),
+      h('h3', { key: 'h' }, t('nodes.new')),
       h('div', { key: 'r', className: 'row' }, [
-        h('input', { key: 'i', value: newName, placeholder: 'имя, например nbw', style: { width: 220 }, onChange: (e) => setNewName(e.target.value) }),
+        h('input', { key: 'i', value: newName, placeholder: t('nodes.namePlaceholder'), style: { width: 220 }, onChange: (e) => setNewName(e.target.value) }),
         h('button', {
           key: 'b',
           disabled: busy || !newName.trim(),
-          onClick: () => { run({ op: 'create', body: { name: newName.trim() } }, 'узел создан'); setNewName('') },
-        }, 'создать и выдать токен'),
+          onClick: () => { run({ op: 'create', body: { name: newName.trim() } }, t('nodes.created')); setNewName('') },
+        }, t('nodes.create')),
       ]),
     ]),
 
     h('section', { key: 'settings', style: only('settings') }, [
-      h('h3', { key: 'h' }, 'Общие настройки'),
+      h('h3', { key: 'h' }, t('tab.settings')),
       h('div', { key: 'note', className: 'muted' },
-        'Меняются в конфиге плагина и применяются после перезапуска. Здесь показано, что действует сейчас.'),
+        t('settings.note')),
       settings
         ? h('table', { key: 't' }, [
           h('tbody', { key: 'b' }, [
-            row('self — каталоги хоста, куда можно копировать с узлов',
-              (settings.selfRoots ?? []).length ? settings.selfRoots.join(', ') : 'нет (self выключен)'),
-            row('сколько модель ждёт ответа на вопрос', `${settings.approvalWaitSeconds} с (0 — до отмены)`),
-            row('сколько вопрос живёт в очереди узла', `${settings.approvalTtlSeconds} с`),
-            row('узел считается живым после последней связи', `${settings.aliveTimeoutSeconds} с`),
-            row('пинг по сокету', settings.wsPingSeconds ? `каждые ${settings.wsPingSeconds} с` : 'выключен'),
+            row(t('settings.self'),
+              (settings.selfRoots ?? []).length ? settings.selfRoots.join(', ') : t('settings.selfOff')),
+            row(t('settings.wait'), t('common.waitForever', { value: settings.approvalWaitSeconds })),
+            row(t('settings.ttl'), t('common.seconds', { value: settings.approvalTtlSeconds })),
+            row(t('settings.alive'), t('common.seconds', { value: settings.aliveTimeoutSeconds })),
+            row(t('settings.ping'), settings.wsPingSeconds ? t('common.seconds', { value: settings.wsPingSeconds }) : t('settings.off')),
           ]),
         ])
-        : h('div', { className: 'muted' }, 'не удалось прочитать настройки'),
+        : h('div', { className: 'muted' }, t('settings.failed')),
       h('div', { key: 'selfnote', className: 'muted', style: { marginTop: 8 } },
-        'Копирование на хост работает только для каталогов из self: это отдельное разрешение, '
-        + 'потому что дальше модель может трогать их локальным shell — уже под песочницей DSH.'),
+        t('settings.selfNote')),
     ]),
   ])
 }
@@ -615,6 +584,15 @@ function NodesPanel () {
 /** Точка входа клиентского плагина. */
 export const name = 'dsh-nodes'
 export const inject = ['slots']
+
+/**
+ * Перевод панели. До `apply` ключ возвращается как есть: так разметка остаётся
+ * работоспособной, даже если локаль почему-то не смонтировалась.
+ */
+let t = (key, vars) => {
+  if (vars) return String(key).replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? `{${name}}`))
+  return key
+}
 
 export function apply (ctx) {
   try {
@@ -627,7 +605,7 @@ export function apply (ctx) {
       return
     }
     slots.inject('settings.section', () => slots.register(
-      { name: 'settings.section', id: 'dsh-nodes', order: 35, label: () => 'Узлы' },
+      { name: 'settings.section', id: 'dsh-nodes', order: 35, label: () => t('nodes.title') },
       NodesPanel,
     ))
   } catch (error) {

@@ -1,6 +1,6 @@
 {
   "name": "@dr-co/dsh-nodes",
-  "version": "0.0.74",
+  "version": "0.0.75",
   "description": "DSH plugin: remote nodes announce their APIs, the model calls their methods (MCP aggregator side)",
   "type": "module",
   "main": "./index.mjs",

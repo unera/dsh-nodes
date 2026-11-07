@@ -1037,3 +1037,13 @@ test('sandboxStrict: в пределах base не спрашиваем', async 
   assert.ok(taken, 'команда должна уйти на узел сразу')
   assert.equal(asked, 0, 'в пределах base вопросов нет')
 })
+
+test('словари панели полны во всех трёх языках', async () => {
+  const { en, ru, zh } = await import('../src/client/i18n.js')
+  const keys = Object.keys(en)
+  assert.ok(keys.length > 60, `строк должно быть много, а их ${keys.length}`)
+  for (const [name, dict] of [['ru', ru], ['zh', zh]]) {
+    const missing = keys.filter((key) => !(key in dict))
+    assert.deepEqual(missing, [], `${name}: нет строк ${missing.join(', ')}`)
+  }
+})
