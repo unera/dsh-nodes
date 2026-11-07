@@ -581,7 +581,8 @@ function NodesPanel () {
       settings
         ? h('table', { key: 't' }, [
           h('tbody', { key: 'b' }, [
-            row(t('settings.self'),
+            row(t('settings.selfSession'), t('settings.selfAlways')),
+            row(t('settings.selfExtra'),
               (settings.selfRoots ?? []).length ? settings.selfRoots.join(', ') : t('settings.selfOff')),
             row(t('settings.wait'), t('common.waitForever', { value: settings.approvalWaitSeconds })),
             row(t('settings.ttl'), t('common.seconds', { value: settings.approvalTtlSeconds })),

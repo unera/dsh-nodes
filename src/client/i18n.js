@@ -10,6 +10,10 @@
 export const NS = 'dsh-nodes'
 
 export const en = {
+  'settings.selfSession': 'self — where files may be copied to',
+  'settings.selfAlways': 'the session working directory, always allowed',
+  'settings.selfExtra': 'additional host directories',
+  'settings.selfNote': 'The session working directory is always available: the model already writes there with its own tools. Additional directories are an explicit permission, because from there it can reach them with a local shell — under the DSH sandbox.',
   'unit.sec': 's',
   'confirm.separator': ', data from ',
   'confirm.binds': ' and binds ',
@@ -96,6 +100,10 @@ export const en = {
 }
 
 export const ru = {
+  'settings.selfSession': 'self — куда можно копировать файлы',
+  'settings.selfAlways': 'рабочая директория сессии, разрешена всегда',
+  'settings.selfExtra': 'дополнительные каталоги хоста',
+  'settings.selfNote': 'Рабочая директория сессии доступна всегда: модель и так пишет туда своими инструментами. Дополнительные каталоги — отдельное разрешение, потому что дальше она может достать их локальным shell, уже под песочницей DSH.',
   'unit.sec': 'с',
   'confirm.separator': ', данные — с ',
   'confirm.binds': ' и привязывает ',
@@ -182,6 +190,10 @@ export const ru = {
 }
 
 export const zh = {
+  'settings.selfSession': 'self — 可复制到何处',
+  'settings.selfAlways': '会话工作目录，始终允许',
+  'settings.selfExtra': '额外的宿主目录',
+  'settings.selfNote': '会话工作目录始终可用：模型本来就用它自己的工具写入。额外目录是单独的授权，因为之后它可以用本地 shell 访问（在 DSH 沙箱下）。',
   'unit.sec': '秒',
   'confirm.separator': '，数据来自 ',
   'confirm.binds': ' 并绑定 ',
