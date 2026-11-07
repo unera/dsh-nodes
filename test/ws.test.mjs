@@ -221,3 +221,26 @@ test('alive с отставшим номером получает state сраз
   assert.equal(pushed.state, 2)
   socket.close()
 })
+
+test('кадр уходит только ждущему: занятый узел не получает ничего', async () => {
+  const { node, token } = await makeNode('busy')
+  const socket = await open(token)
+  socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(socket, 'hello-ok')
+
+  // узел НЕ говорил «жду»: новая работа не должна порождать кадр
+  queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
+  presence.notify(node.id)
+  const silence = await Promise.race([
+    frame(socket, 'state'),
+    new Promise((resolve) => setTimeout(() => resolve('тишина'), 250)),
+  ])
+  assert.equal(silence, 'тишина')
+
+  // сказал «жду» — и кадр приходит
+  const pushed = frame(socket, 'state')
+  socket.send(JSON.stringify({ t: 'alive', known: 0 }))
+  const state = await pushed
+  assert.equal(state.state, 1)
+  socket.close()
+})

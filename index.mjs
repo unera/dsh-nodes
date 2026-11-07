@@ -44,6 +44,7 @@ export const Config = z.object({
   maxQueuePerNode: z.natural().default(100).description('Потолок незакрытых команд на узел'),
   maxBodyBytes: z.natural().default(1048576).description('Потолок тела запроса'),
   aliveTimeoutSeconds: z.natural().default(60).description('Сколько без обращений считать узел живым'),
+  wsPingSeconds: z.natural().default(0).description('Период пинга по сокету; 0 — не пинговать'),
   maxPendingEnroll: z.natural().default(50).description('Потолок списка заявок на регистрацию'),
   adminTokenFile: z.string().description('Где лежит сгенерированный админ-токен'),
 })
@@ -104,7 +105,7 @@ export function apply (ctx, config) {
     // `ws` — CommonJS, и берём его синхронно: `apply` не должен быть async,
     // иначе cordis уводит выполнение в чужое волокно и регистрации не видно.
     const { WebSocketServer } = require('ws')
-    presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log })
+    presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log, pingSeconds: config.wsPingSeconds ?? 0 })
   } catch (error) {
     log('warn', `WebSocket недоступен (${error.message}); присутствие только по HTTP`)
   }
