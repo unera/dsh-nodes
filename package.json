@@ -1,7 +1,7 @@
 {
   "name": "@dr-co/dsh-nodes",
-  "version": "0.0.83",
-  "description": "DSH plugin: remote nodes announce their APIs, the model calls their methods (MCP aggregator side)",
+  "version": "0.0.84",
+  "description": "Run commands on remote machines from a DSH session: sandboxed (ro/rw/full), policy-controlled, audited",
   "type": "module",
   "main": "./index.mjs",
   "exports": {
