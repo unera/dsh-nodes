@@ -583,15 +583,19 @@ function NodesPanel () {
 
 /** Точка входа клиентского плагина. */
 export const name = 'dsh-nodes'
-export const inject = ['slots']
+// `locale` объявлен в inject: без этого cordis бросает при обращении
+// к ctx.locale, словари не регистрируются, и в интерфейсе видны ключи
+export const inject = ['slots', 'locale']
 
 /**
  * Перевод панели. До `apply` ключ возвращается как есть: так разметка остаётся
  * работоспособной, даже если локаль почему-то не смонтировалась.
  */
 let t = (key, vars) => {
-  if (vars) return String(key).replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? `{${name}}`))
-  return key
+  // запасной вариант — русский словарь: лучше знакомый язык, чем ключ на экране
+  const text = String(ru[key] ?? en[key] ?? key)
+  if (vars) return text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? `{${name}}`))
+  return text
 }
 
 export function apply (ctx) {
