@@ -195,6 +195,12 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
       h('div', { key: 'a', className: 'aliases' }, node.aliases.filter((alias) => alias !== node.name).join(', ') || 'без алиасов'),
       // аптайм отдельной строкой под именем: видно, работает ли узел с ночи или
       // только что перезапустился
+      h('div', { key: 'flags', style: { display: 'flex', gap: 8, fontSize: 12, marginTop: 2 } }, [
+        h('span', { key: 's', style: { color: node.socket ? '#22c55e' : '#9ca3af' } },
+          node.socket ? 'сокет: есть' : 'сокет: нет'),
+        h('span', { key: 'l', className: 'muted' },
+          node.lastSeen ? `связь: ${ago(node.lastSeen)} назад` : 'связи не было'),
+      ]),
       node.online && uptimeText(node.uptimeSeconds)
         ? h('div', { key: 'u', className: 'muted', style: { fontSize: 12, marginTop: 2 } }, `работает ${uptimeText(node.uptimeSeconds)}`)
         : null,

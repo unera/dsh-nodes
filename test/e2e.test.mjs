@@ -958,3 +958,17 @@ test('пинг не ждёт дольше 15 секунд, обычный выз
   const short = queue.take(nodeId, { limit: 5 }).commands[0]
   assert.equal(short.timeout, 3)
 })
+
+test('админка различает сокет и время последней связи', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'socket-flag' }) })
+  const nodeId = created.body.node.id
+  store.touch(nodeId)
+  const withoutSocket = adminApi.handleAdmin({ store, queue, config: CONFIG, presence: { online: () => false } }, 'GET', '/nodes')
+  const first = withoutSocket.body.nodes.find((node) => node.id === nodeId)
+  assert.equal(first.socket, false, 'сокета нет — флаг false')
+  assert.ok(first.lastSeen, 'время последней связи должно быть')
+
+  const withSocket = adminApi.handleAdmin({ store, queue, config: CONFIG, presence: { online: () => true } }, 'GET', '/nodes')
+  const second = withSocket.body.nodes.find((node) => node.id === nodeId)
+  assert.equal(second.socket, true, 'сокет есть — флаг true')
+})
