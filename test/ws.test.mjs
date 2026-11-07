@@ -316,3 +316,15 @@ test('старое имя кадра alive продолжает работать
   assert.equal(state.state, 1)
   socket.close()
 })
+
+test('сервер отвечает pong на прикладной ping с тем же id', async () => {
+  const { node, token } = await makeNode('pingable')
+  const socket = await open(token)
+  socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(socket, 'hello-ok')
+  const answer = frame(socket, 'pong')
+  socket.send(JSON.stringify({ t: 'ping', id: 42 }))
+  const pong = await answer
+  assert.equal(pong.id, 42, 'id должен вернуться тем же: клиент различает ответы по нему')
+  socket.close()
+})
