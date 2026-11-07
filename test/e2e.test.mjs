@@ -1,3 +1,10 @@
+import { existsSync } from 'node:fs'
+
+// соседний репозиторий клиента есть локально, но не в CI: без него эти тесты
+// не про то, что собирается здесь, а про контракт двух репозиториев
+const hasClient = existsSync(new URL('../../dsh-node-client/lib/api.mjs', import.meta.url))
+// без клиента тесты не падают, а помечаются пропущенными
+const t = hasClient ? test : (title, fn) => test.skip(title, fn)
 /**
  * Сквозной тест: настоящий HTTP-сервер с обработчиком плагина и настоящий
  * клиентский цикл. Ничего не подменяем — проверяем то, что поедет на машины.
@@ -57,7 +64,7 @@ async function admin (path, options = {}) {
   return handleAdmin({ store, queue, config: CONFIG, prefix: '/dsh-nodes', origin: 'https://example' }, method, rest, body)
 }
 
-test('узел создаётся админом и объявляет API', async () => {
+t('узел создаётся админом и объявляет API', async () => {
   const created = await admin('/v1/admin/nodes', {
     method: 'POST',
     body: JSON.stringify({ name: 'nbw', defaultTimeout: 5 }),
@@ -81,7 +88,7 @@ test('узел создаётся админом и объявляет API', asy
   assert.deepEqual(nodes.body.nodes[0].apis.map((entry) => entry.id), announced.body.apis.map((entry) => entry.id))
 })
 
-test('команда едет до узла и возвращается результатом', async () => {
+t('команда едет до узла и возвращается результатом', async () => {
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
   const { seq, promise } = queue.enqueue({
@@ -109,7 +116,7 @@ test('команда едет до узла и возвращается резу
   assert.equal(outcome.results[0].text, 'привет\n')
 })
 
-test('выдача строго после курсора и не отдаёт отданное', async () => {
+t('выдача строго после курсора и не отдаёт отданное', async () => {
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
   const token = store.reissueToken(node.id)
@@ -131,7 +138,7 @@ test('выдача строго после курсора и не отдаёт �
   assert.equal((await second.promise).status, 'error')
 })
 
-test('поздний результат — 409, чужой номер — 404', async () => {
+t('поздний результат — 409, чужой номер — 404', async () => {
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
   const token = store.reissueToken(node.id)
@@ -151,7 +158,7 @@ test('поздний результат — 409, чужой номер — 404',
   )
 })
 
-test('таймаут снимает команду и отдаёт timeout ожидающему', async () => {
+t('таймаут снимает команду и отдаёт timeout ожидающему', async () => {
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
   const { promise } = queue.enqueue({ nodeId: node.id, api: apiId, method: 'exec', args: { command: 'sleep 30' }, timeout: 0.05 })
@@ -160,7 +167,7 @@ test('таймаут снимает команду и отдаёт timeout ож�
   assert.equal(queue.info(node.id).queued, 0)
 })
 
-test('валидация аргументов отвечает до постановки в очередь', () => {
+t('валидация аргументов отвечает до постановки в очередь', () => {
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
   const def = store.api(apiId)
@@ -174,7 +181,7 @@ test('валидация аргументов отвечает до постан
   assert.equal(before, 0) // отказ не должен порождать команду
 })
 
-test('заявка на регистрацию: pending → approve → токен один раз', async () => {
+t('заявка на регистрацию: pending → approve → токен один раз', async () => {
   const uuid = 'aaaa-bbbb-cccc-dddd'
   const first = await fetch(`${base}/v1/enroll`, {
     method: 'POST',
@@ -204,20 +211,20 @@ test('заявка на регистрацию: pending → approve → токе
   assert.equal(second.status, 409)
 })
 
-test('без токена — 401, с плохим токеном — 401', async () => {
+t('без токена — 401, с плохим токеном — 401', async () => {
   const noToken = await fetch(`${base}/v1/commands?after=0`)
   assert.equal(noToken.status, 401)
   const bad = await fetch(`${base}/v1/commands?after=0`, { headers: { authorization: 'Bearer nope' } })
   assert.equal(bad.status, 401)
 })
 
-test('старая ссылка на админку ведёт под авторизацию DSH', async () => {
+t('старая ссылка на админку ведёт под авторизацию DSH', async () => {
   const response = await fetch(`${base}/admin`, { redirect: 'manual' })
   assert.equal(response.status, 302)
   assert.equal(response.headers.get('location'), '/api/dsh-nodes/admin')
 })
 
-test('страница админки не несёт секретов и ходит на owner-гейт', async () => {
+t('страница админки не несёт секретов и ходит на owner-гейт', async () => {
   const { renderAdmin } = await import('../lib/admin.mjs')
   const html = renderAdmin()
   assert.match(html, /dsh-nodes/)
@@ -226,7 +233,7 @@ test('страница админки не несёт секретов и ход
   assert.match(html, /data-save=/, 'правка алиасов должна быть в странице')
 })
 
-test('pairing: админ выдаёт ссылку, клиент меняет код на токен, второй раз — 409', async () => {
+t('pairing: админ выдаёт ссылку, клиент меняет код на токен, второй раз — 409', async () => {
   const created = await admin('/v1/admin/pairing', { method: 'POST', body: JSON.stringify({ ttlSeconds: 600 }) })
   assert.equal(created.status, 201)
   assert.match(created.body.url, /\/dsh-nodes\/pair\?v=/)
@@ -251,7 +258,7 @@ test('pairing: админ выдаёт ссылку, клиент меняет �
   assert.equal(again.status, 409)
 })
 
-test('pairing: истёкший код отвергается', async () => {
+t('pairing: истёкший код отвергается', async () => {
   const created = await admin('/v1/admin/pairing', { method: 'POST', body: JSON.stringify({ ttlSeconds: 0.05 }) })
   await new Promise((resolve) => setTimeout(resolve, 80))
   const response = await fetch(`${base}/v1/pair`, {
@@ -262,7 +269,7 @@ test('pairing: истёкший код отвергается', async () => {
   assert.equal(response.status, 410)
 })
 
-test('админ-API: список узлов с API, правка алиасов, заявки', async () => {
+t('админ-API: список узлов с API, правка алиасов, заявки', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'lamp-test' }) })
   assert.equal(created.status, 201)
   const id = created.body.node.id
@@ -289,7 +296,7 @@ test('админ-API: список узлов с API, правка алиасо�
   )
 })
 
-test('админ-API: заявка approve и reject через функции', async () => {
+t('админ-API: заявка approve и reject через функции', async () => {
   const uuid = 'deadbeef-0000-1111-2222-333344445555'
   await fetch(`${base}/v1/enroll`, {
     method: 'POST',
@@ -314,7 +321,7 @@ test('админ-API: заявка approve и reject через функции',
   assert.equal(rejected.body.status, 'rejected')
 })
 
-test('админ-API: переименование меняет имя, а не добавляет алиас', async () => {
+t('админ-API: переименование меняет имя, а не добавляет алиас', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'rename-me' }) })
   const id = created.body.node.id
   const updated = await admin(`/nodes/${id}/update`, {
@@ -327,7 +334,7 @@ test('админ-API: переименование меняет имя, а не 
   assert.equal(await admin(`/nodes/${id}/update`, { method: 'POST', body: JSON.stringify({ name: 'nbw' }) }).then((r) => r.status), 409)
 })
 
-test('отзыв токена открывает заявку заново', async () => {
+t('отзыв токена открывает заявку заново', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'revoke-me' }) })
   const id = created.body.node.id
   const token = created.body.token
@@ -344,7 +351,7 @@ test('отзыв токена открывает заявку заново', asy
   await assert.rejects(() => api.state(base, token), /token|unauthorized|токен/i)
 })
 
-test('в кадре команды едет идентификатор сессии', () => {
+t('в кадре команды едет идентификатор сессии', () => {
   
   const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 10 })
   const node = { id: 99 }
@@ -354,7 +361,7 @@ test('в кадре команды едет идентификатор сесс�
   assert.equal(taken.commands[0].session, 'session-abc')
 })
 
-test('токен по заявке получает только тот, кто знает nonce', async () => {
+t('токен по заявке получает только тот, кто знает nonce', async () => {
   const uuid = 'deadbeef-1111-2222-3333-444455556666'
   const nonce = 'client-secret-1'
   await fetch(`${base}/v1/enroll`, {
@@ -376,7 +383,7 @@ test('токен по заявке получает только тот, кто 
   assert.ok(body.token)
 })
 
-test('отказ песочницы: при выключенных апрувах спрашивать не идут', async () => {
+t('отказ песочницы: при выключенных апрувах спрашивать не идут', async () => {
   // узел, которому владелец запретил апрувы
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'no-ask' }) })
   const nodeId = created.body.node.id
@@ -416,7 +423,7 @@ test('отказ песочницы: при выключенных апрува�
 })
 
 
-test('отказ песочницы: апрувы выключены — отказ окончательный', async () => {
+t('отказ песочницы: апрувы выключены — отказ окончательный', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'ask-off' }) })
   const nodeId = created.body.node.id
   const announced = store.announce(nodeId, [{ name: 'bash', version: '8', methods: [{ method: 'exec', args: { type: 'object' } }] }])
@@ -452,7 +459,7 @@ test('отказ песочницы: апрувы выключены — отк�
   assert.equal(asked, 0, 'при выключенных апрувах человека не спрашивают')
 })
 
-test('рендер ошибки показывает код возврата и stderr', () => {
+t('рендер ошибки показывает код возврата и stderr', () => {
   const tool = createTools({ store, queue, config: CONFIG, epoch: queue.epoch, sandboxFor: () => null })
     .find((entry) => entry.name === 'nodes_call')
   const rendered = tool.output.render({}, {
@@ -467,7 +474,7 @@ test('рендер ошибки показывает код возврата и 
   assert.match(text, /"code":1/)
 })
 
-test('отказ песочницы: согласие человека превращается в повтор с широким режимом', async () => {
+t('отказ песочницы: согласие человека превращается в повтор с широким режимом', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'ask-on' }) })
   const nodeId = created.body.node.id
   const announced = store.announce(nodeId, [{ name: 'bash', version: '7', methods: [{ method: 'exec', args: { type: 'object' } }] }])
@@ -515,7 +522,7 @@ test('отказ песочницы: согласие человека прев�
   assert.equal(outcome.status, 'ok')
 })
 
-test('аргумент sandbox переводится в словарь DSH: ro → read-only, rw → workspace-write, full → danger-full-access', async () => {
+t('аргумент sandbox переводится в словарь DSH: ro → read-only, rw → workspace-write, full → danger-full-access', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'map-sandbox' }) })
   const nodeId = created.body.node.id
   const announced = store.announce(nodeId, [{ name: 'bash', version: '6', methods: [{ method: 'exec', args: { type: 'object' } }] }])
@@ -540,7 +547,7 @@ test('аргумент sandbox переводится в словарь DSH: ro 
   }
 })
 
-test('взятая команда не выдаётся второй раз', () => {
+t('взятая команда не выдаётся второй раз', () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 50 })
   const nodeId = 4242
   for (let i = 0; i < 3; i++) queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i } })
@@ -557,7 +564,7 @@ test('взятая команда не выдаётся второй раз', ()
   assert.equal(third.ready, 0)
 })
 
-test('взятая команда без ответа закрывается как lost, а не висит вечно', async () => {
+t('взятая команда без ответа закрывается как lost, а не висит вечно', async () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 1, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
   const nodeId = 555
   const { promise } = queue.enqueue({ nodeId, api: 1, method: 'exec', args: {} })
@@ -569,7 +576,7 @@ test('взятая команда без ответа закрывается к�
   assert.match(outcome.message, /не ответил/)
 })
 
-test('отказ без песочницы-вопроса: сервер ставит session.approve и ждёт ответа узла', async () => {
+t('отказ без песочницы-вопроса: сервер ставит session.approve и ждёт ответа узла', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'local-approve' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -626,7 +633,7 @@ test('отказ без песочницы-вопроса: сервер став
   assert.equal(retry.commands[0].escalation, 1)
 })
 
-test('аптайм считается по часам сервера, а не клиента', async () => {
+t('аптайм считается по часам сервера, а не клиента', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'uptime-node' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -643,7 +650,7 @@ test('аптайм считается по часам сервера, а не к
   assert.equal(humanUptime(45 * 1000), '45s')
 })
 
-test('врущие часы клиента не ломают аптайм: считается только дельта', async () => {
+t('врущие часы клиента не ломают аптайм: считается только дельта', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'uptime-skew' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -658,7 +665,7 @@ test('врущие часы клиента не ломают аптайм: сч�
   assert.ok(computed < 60, `ожидали меньше минуты, получили ${computed}`)
 })
 
-test('исход повтора после подтверждения тоже попадает в аудит', async () => {
+t('исход повтора после подтверждения тоже попадает в аудит', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-retry' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -703,7 +710,7 @@ test('исход повтора после подтверждения тоже �
   assert.ok(store.readAudit(50).length > before)
 })
 
-test('approver=local без session.approve не принимается: узел честно становится none', async () => {
+t('approver=local без session.approve не принимается: узел честно становится none', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'liar-node' }) })
   const nodeId = created.body.node.id
   await fetch(`${base}/v1/announce`, {
@@ -720,7 +727,7 @@ test('approver=local без session.approve не принимается: узе�
   assert.equal(node.allow_escalation, 0)
 })
 
-test('approver=local с session.approve принимается', async () => {
+t('approver=local с session.approve принимается', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'honest-node' }) })
   const nodeId = created.body.node.id
   await fetch(`${base}/v1/announce`, {
@@ -738,7 +745,7 @@ test('approver=local с session.approve принимается', async () => {
   assert.equal(store.node(nodeId).approver, 'local')
 })
 
-test('человек отказал в DSH-апруве — команда не выполняется', async () => {
+t('человек отказал в DSH-апруве — команда не выполняется', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'reject-node' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -786,7 +793,7 @@ test('человек отказал в DSH-апруве — команда не 
   assert.equal(last.outcome, 'rejected', 'отказ человека должен быть в аудите')
 })
 
-test('человек разрешил в DSH-апруве — повтор уходит с approved наверху и ступенью', async () => {
+t('человек разрешил в DSH-апруве — повтор уходит с approved наверху и ступенью', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'allow-node' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -836,7 +843,7 @@ test('человек разрешил в DSH-апруве — повтор ух�
   assert.equal(outcome.results.length, 1, 'результат — ровно то, что вернул узел')
 })
 
-test('просроченная невыданная команда получает ответ, а не тишину', async () => {
+t('просроченная невыданная команда получает ответ, а не тишину', async () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
   const { promise } = queue.enqueue({ nodeId: 777, api: 1, method: 'exec', args: {} })
   // никто не забирал: узел был offline
@@ -846,7 +853,7 @@ test('просроченная невыданная команда получа�
   assert.equal(queue.take(777, { limit: 5 }).commands.length, 0)
 })
 
-test('команда апрува не стареет: человек может думать дольше commandTtl', () => {
+t('команда апрува не стареет: человек может думать дольше commandTtl', () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 86400, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
   queue.enqueue({ nodeId: 778, api: 1, method: 'approve', args: { id: 'x', text: 't' }, timeout: 86400 })
   queue.sweep(Date.now() + 10 * 60 * 1000)
@@ -854,7 +861,7 @@ test('команда апрува не стареет: человек может
   assert.equal(got.commands.length, 1, 'вопрос человеку должен дождаться ответа')
 })
 
-test('maxQueue считает только невыданное: взятая команда не занимает слот', () => {
+t('maxQueue считает только невыданное: взятая команда не занимает слот', () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 2 })
   const nodeId = 779
   for (let i = 0; i < 2; i++) queue.enqueue({ nodeId, api: 1, method: 'exec', args: { i } })
@@ -865,7 +872,7 @@ test('maxQueue считает только невыданное: взятая к
   assert.ok(after.seq, 'после выдачи место освобождается')
 })
 
-test('close различает «уже закрыта» и «такой не было»', async () => {
+t('close различает «уже закрыта» и «такой не было»', async () => {
   const queue = new Queue({ epoch: 1, defaultTimeout: 30, maxBatch: 5, maxQueue: 10 })
   const nodeId = 780
   const { seq, promise } = queue.enqueue({ nodeId, api: 1, method: 'exec', args: {} })
@@ -876,7 +883,7 @@ test('close различает «уже закрыта» и «такой не б
   assert.equal(queue.close(nodeId, seq + 100, { ok: true, results: [] }), 'unknown')
 })
 
-test('схема доводится по факту: нехватка колонки не мешает старту', async () => {
+t('схема доводится по факту: нехватка колонки не мешает старту', async () => {
   // имитируем живую базу, где user_version «всё применено», а колонки нет
   const dir = mkdtempSync(join(tmpdir(), 'dsh-nodes-heal-'))
   const file = join(dir, 'state.sqlite')
@@ -893,7 +900,7 @@ test('схема доводится по факту: нехватка колон
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('аудит отдаётся по маршруту админки с параметром limit', async () => {
+t('аудит отдаётся по маршруту админки с параметром limit', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-route' }) })
   void created
   store.writeAudit({ kind: 'exec', node: 1, mode: 'full', command: 'echo маршрут', at: Date.now() })
@@ -904,7 +911,7 @@ test('аудит отдаётся по маршруту админки с пар
   assert.ok(body.audit.length <= 5)
 })
 
-test('аудит отдаёт имя узла, а не только номер', async () => {
+t('аудит отдаёт имя узла, а не только номер', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-name' }) })
   const nodeId = created.body.node.id
   store.writeAudit({ kind: 'exec', node: nodeId, mode: 'full', command: 'echo имя', at: Date.now() })
@@ -914,7 +921,7 @@ test('аудит отдаёт имя узла, а не только номер',
   assert.equal(row.nodeName, 'audit-name', 'человеку нужен имя, а не номер')
 })
 
-test('пинг размечен метками времени: отклик и разница часов считаются', async () => {
+t('пинг размечен метками времени: отклик и разница часов считаются', async () => {
   const { annotatePing, preciseNow } = await import('../lib/tools.mjs').then(async (tools) => ({
     annotatePing: tools.annotatePing,
     preciseNow: (await import('../lib/queue.mjs')).preciseNow,
@@ -930,14 +937,14 @@ test('пинг размечен метками времени: отклик и �
   assert.equal(filled.pong != null, true, 'ответ узла не теряется')
 })
 
-test('не пинг — не трогаем результат', () => {
+t('не пинг — не трогаем результат', () => {
   const outcome = { ok: true, results: [{ type: 'text', text: 'обычный вывод' }] }
   const annotated = adminApi.annotate?.(outcome, { method: 'exec' }) ?? outcome
   assert.deepEqual(annotated, outcome)
 })
 
 
-test('пинг не ждёт дольше 15 секунд, обычный вызов — ждёт', async () => {
+t('пинг не ждёт дольше 15 секунд, обычный вызов — ждёт', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'ping-timeout', defaultTimeout: 600 }) })
   const nodeId = created.body.node.id
   const announced = store.announce(nodeId, [
@@ -957,7 +964,7 @@ test('пинг не ждёт дольше 15 секунд, обычный выз
   assert.equal(short.timeout, 3)
 })
 
-test('админка различает сокет и время последней связи', async () => {
+t('админка различает сокет и время последней связи', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'socket-flag' }) })
   const nodeId = created.body.node.id
   store.touch(nodeId)
@@ -971,7 +978,7 @@ test('админка различает сокет и время последн�
   assert.equal(second.socket, true, 'сокет есть — флаг true')
 })
 
-test('остановленный клиент сразу перестаёт быть присоединённым', async () => {
+t('остановленный клиент сразу перестаёт быть присоединённым', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'stopped' }) })
   const nodeId = created.body.node.id
   store.touch(nodeId)  // связь была только что: по времени узел ещё «живой»
@@ -987,7 +994,7 @@ test('остановленный клиент сразу перестаёт бы
   assert.equal(second.online, true, 'свежесть связи ещё держит прежний признак online')
 })
 
-test('sandboxStrict: отказ человека не запускает команду вовсе', async () => {
+t('sandboxStrict: отказ человека не запускает команду вовсе', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'strict-deny' }) })
   const nodeId = created.body.node.id
   const announced = store.announce(nodeId, [
@@ -1012,7 +1019,7 @@ test('sandboxStrict: отказ человека не запускает ком�
   assert.equal(queue.take(nodeId, { limit: 5 }).commands.length, 0, 'задание не должно попасть в очередь')
 })
 
-test('sandboxStrict: в пределах base не спрашиваем', async () => {
+t('sandboxStrict: в пределах base не спрашиваем', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'strict-silent' }) })
   const nodeId = created.body.node.id
   const announced = store.announce(nodeId, [
@@ -1038,7 +1045,7 @@ test('sandboxStrict: в пределах base не спрашиваем', async 
   assert.equal(asked, 0, 'в пределах base вопросов нет')
 })
 
-test('словари панели полны во всех трёх языках', async () => {
+t('словари панели полны во всех трёх языках', async () => {
   const { en, ru, zh } = await import('../src/client/i18n.js')
   const keys = Object.keys(en)
   assert.ok(keys.length > 60, `строк должно быть много, а их ${keys.length}`)
