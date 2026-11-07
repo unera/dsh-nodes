@@ -523,6 +523,13 @@ components:
           description: |
             Result blocks. The last one is usually a JSON object with `code`,
             `signal`, `cwd` and `sandbox` (see SandboxFacts).
+
+            For `session.ping` the node declares `rttMs` in its reply but leaves
+            it `null`: a node cannot know the server's clock, so it cannot time
+            the round trip. The server fills the field in place (and adds
+            `clockSkewMs`, the node clock offset), leaving the shape of the reply
+            exactly what the node announced. No extra block, no extra fields on
+            every other call.
           items:
             type: object
             properties:
