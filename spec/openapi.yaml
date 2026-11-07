@@ -181,21 +181,7 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/QueueState"
-                  - type: object
-                    properties:
-                      apis:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id: { type: integer }
-                            name: { type: string }
-                            version: { type: string, nullable: true }
-                      warnings:
-                        type: array
-                        items: { type: string }
+                $ref: "#/components/schemas/AnnounceAccepted"
         "400": { $ref: "#/components/responses/Error" }
 
   /v1/state:
@@ -205,16 +191,11 @@ paths:
       security: [{ nodeToken: [] }]
       responses:
         "200":
-          description: state
+          description: state of this node and its queue
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/QueueState"
-                  - type: object
-                    properties:
-                      node: { type: integer }
-                      online: { type: boolean }
+                $ref: "#/components/schemas/NodeState"
 
   /v1/commands:
     get:
@@ -522,6 +503,64 @@ components:
         escalation:
           type: integer
           description: escalation step on which the command ran
+
+    NodeState:
+      type: object
+      description: |
+        Answer to `GET /v1/state`: what this node is and how much work waits for
+        it. The node is identified by its number here — calls address nodes by
+        alias, and this field exists for logs and for correlating with the admin
+        panel, not for calling.
+      allOf:
+        - $ref: "#/components/schemas/QueueState"
+        - type: object
+          properties:
+            node:
+              type: integer
+              description: numeric node id, the same one the admin panel shows
+            online:
+              type: boolean
+              description: |
+                Whether the node is considered reachable right now: a live socket
+                or a recent request. It is not a promise that the next command
+                will be picked up — a node can hold a socket and be busy.
+
+    AnnounceAccepted:
+      type: object
+      description: |
+        Answer to `PUT /v1/announce`: the ids assigned to the APIs this node just
+        declared, plus any warnings about schema conflicts with other nodes.
+
+        The ids are what a command carries in its `api` field, so a client must
+        keep them. They are not stable across a node being deleted and re-created,
+        and they differ per node: the same `session` API may be `3` on one node
+        and `4` on another, which is why the server never addresses a node by an
+        id from somewhere else.
+      allOf:
+        - $ref: "#/components/schemas/QueueState"
+        - type: object
+          properties:
+            apis:
+              type: array
+              description: ids assigned to the announced APIs, in the order given
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    description: number to use in `Command.api` for this node
+                  name:
+                    type: string
+                  version:
+                    type: string
+                    nullable: true
+            warnings:
+              type: array
+              description: |
+                Schema conflicts with other nodes announcing the same name with a
+                different contract. Not an error: versions stay separate, and the
+                warning exists so a human can see the divergence.
+              items: { type: string }
 
     CommandBatch:
       type: object
