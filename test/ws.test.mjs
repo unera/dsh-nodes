@@ -283,3 +283,36 @@ test('события изолированы: работа одному узлу 
   busy.close()
   idle.close()
 })
+
+test('check_state с known: null закрывает выданные команды как node_restarted', async () => {
+  const { node, token } = await makeNode('restarted')
+  const socket = await open(token)
+  socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(socket, 'hello-ok')
+
+  // команда уже выдана узлу и «исполняется»
+  const { promise } = queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
+  queue.take(node.id, { limit: 5 })
+
+  const answer = frame(socket, 'state')
+  socket.send(JSON.stringify({ t: 'check_state', known: null }))
+  await answer
+
+  const outcome = await promise
+  assert.equal(outcome.code, 'node_restarted', 'модель должна узнать, что результат потерян')
+  assert.match(outcome.message, /перезапустился/)
+  socket.close()
+})
+
+test('старое имя кадра alive продолжает работать', async () => {
+  const { node, token } = await makeNode('legacy')
+  const socket = await open(token)
+  socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(socket, 'hello-ok')
+  queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
+  const pushed = frame(socket, 'state')
+  socket.send(JSON.stringify({ t: 'alive', known: 0 }))
+  const state = await pushed
+  assert.equal(state.state, 1)
+  socket.close()
+})
