@@ -244,3 +244,42 @@ test('кадр уходит только ждущему: занятый узел
   assert.equal(state.state, 1)
   socket.close()
 })
+
+test('события изолированы: работа одному узлу не будит второго', async () => {
+  const first = await makeNode('busy-one')
+  const second = await makeNode('idle-one')
+  const busy = await open(first.token)
+  const idle = await open(second.token)
+  busy.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(busy, 'hello-ok')
+  idle.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
+  await frame(idle, 'hello-ok')
+
+  // оба сказали «жду»
+  const busyState = frame(busy, 'state')
+  queue.enqueue({ nodeId: first.node.id, api: 1, method: 'exec', args: {} })
+  busy.send(JSON.stringify({ t: 'alive', known: 0 }))
+  await busyState
+
+  // работа появилась только у первого — второй должен молчать.
+  // Второму тоже надо сказать «жду», иначе проверка была бы пустой: он и так
+  // ничего не получил бы просто потому, что не заявлялся.
+  idle.send(JSON.stringify({ t: 'alive', known: 0 }))
+  const idleFrame = frame(idle, 'state')
+  queue.enqueue({ nodeId: first.node.id, api: 1, method: 'exec', args: {} })
+  presence.notify(first.node.id)
+  const silence = await Promise.race([
+    idleFrame,
+    new Promise((resolve) => setTimeout(() => resolve('тишина'), 300)),
+  ])
+  assert.equal(silence, 'тишина', 'чужой узел не должен получать кадр про работу первого')
+
+  // и наоборот: работа второму приходит второму
+  const secondState = frame(idle, 'state')
+  queue.enqueue({ nodeId: second.node.id, api: 1, method: 'exec', args: {} })
+  presence.notify(second.node.id)
+  const got = await secondState
+  assert.ok(got.state >= 1)
+  busy.close()
+  idle.close()
+})
