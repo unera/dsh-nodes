@@ -988,3 +988,54 @@ test('остановленный клиент сразу перестаёт бы
   assert.equal(second.attached, false, 'присоединения нет сразу, без ожидания таймаута')
   assert.equal(second.online, true, 'свежесть связи ещё держит прежний признак online')
 })
+
+test('sandboxStrict: отказ человека не запускает команду вовсе', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'strict-deny' }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [
+    { name: 'job', version: '2', methods: [{ method: 'start', args: { type: 'object' } }] },
+  ])
+  const jobApi = announced.apis[0]
+  store.updateNode(nodeId, { access: 'danger-full-access', base: 'rw', approver: 'server', allow_escalation: 1 })
+
+  const asked = []
+  const tools = createTools({
+    store, queue, config: CONFIG, epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'workspace-write' }),
+    approval: { request: async (request) => { asked.push(request); return 'rejected' } },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const outcome = await call.execute({ node: nodeId, api: jobApi, method: 'start', data: { command: 'sleep 10' }, sandbox: 'full', sandboxStrict: true }, {})
+
+  assert.equal(outcome.code, 'sandbox_denied')
+  assert.match(outcome.message, /человек отказал/)
+  assert.equal(asked.length, 1, 'спросили до запуска')
+  assert.match(asked[0].reason, /без понижения/)
+  assert.equal(queue.take(nodeId, { limit: 5 }).commands.length, 0, 'задание не должно попасть в очередь')
+})
+
+test('sandboxStrict: в пределах base не спрашиваем', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'strict-silent' }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [
+    { name: 'job', version: '3', methods: [{ method: 'start', args: { type: 'object' } }] },
+  ])
+  const jobApi = announced.apis[0]
+  store.updateNode(nodeId, { access: 'danger-full-access', base: 'rw', approver: 'server', allow_escalation: 1 })
+
+  let asked = 0
+  const tools = createTools({
+    store, queue, config: CONFIG, epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'workspace-write' }),
+    approval: { request: async () => { asked++; return 'rejected' } },
+  })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  void call.execute({ node: nodeId, api: jobApi, method: 'start', data: { command: 'echo' }, sandbox: 'rw', sandboxStrict: true }, {})
+  let taken = null
+  for (let i = 0; i < 60 && !taken; i++) {
+    taken = queue.take(nodeId, { limit: 5 }).commands[0] ?? null
+    if (!taken) await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assert.ok(taken, 'команда должна уйти на узел сразу')
+  assert.equal(asked, 0, 'в пределах base вопросов нет')
+})
