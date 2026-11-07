@@ -121,3 +121,11 @@ test('nodes_copy: узел→узел отклоняется, self→self коп
   // узлов в тестовом сторе нет — проверяем, что отказ внятный, а не падение
   assert.ok(['unknown_node', 'bad_args'].includes(nodeToNode.code ?? 'unknown_node'))
 })
+
+test('кусок копирования влезает в предел тела результата', async () => {
+  const { DEFAULT_CHUNK } = await import('../lib/copy.mjs')
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../lib/server.mjs', import.meta.url), 'utf8')
+  const maxBody = Number(/maxBodyBytes \?\? ([0-9* ]+)/.exec(source)?.[1]?.trim().replace(/\s/g, '').split('*').reduce((a, b) => Number(a) * Number(b), 1) ?? 0)
+  assert.ok(DEFAULT_CHUNK * 1.4 < maxBody, `кусок ${DEFAULT_CHUNK} с base64 не влезает в ${maxBody}`)
+})
