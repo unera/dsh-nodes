@@ -9,6 +9,8 @@
  */
 import { createElement as h, useEffect, useState } from 'react'
 
+import { NS, en, ru, zh } from './i18n.js'
+
 const BASE = '/api/dsh-nodes'
 
 async function request (path, options = {}) {
@@ -588,14 +590,56 @@ export const name = 'dsh-nodes'
 export const inject = ['slots', 'locale']
 
 /**
- * Перевод панели. До `apply` ключ возвращается как есть: так разметка остаётся
- * работоспособной, даже если локаль почему-то не смонтировалась.
+ * Перевод панели. До `apply` работает свой словарь: разметка остаётся
+ * работоспособной, даже если `ctx.locale` почему-то не смонтировался.
  */
-let t = (key, vars) => {
+let translate = (key, vars) => {
   // запасной вариант — русский словарь: лучше знакомый язык, чем ключ на экране
   const text = String(ru[key] ?? en[key] ?? key)
   if (vars) return text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? `{${name}}`))
   return text
+}
+
+const t = (key, vars) => translate(key, vars)
+
+/**
+ * Регистрирует словари в `ctx.locale` и привязывает `t` к текущему языку.
+ *
+ * Свой словарь остаётся запасным: если сервиса локали нет, панель говорит
+ * по-русски, а не показывает ключи.
+ */
+function mountLocale (ctx) {
+  const locale = ctx?.locale
+  if (typeof locale?.register !== 'function' || typeof locale?.bind !== 'function') {
+    console.warn('[dsh-nodes] локаль недоступна: строки берутся из своего словаря')
+    return
+  }
+  const install = () => {
+    try {
+      locale.addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' })
+    } catch (error) {
+      // язык уже объявлен другим плагином — это норма, остальное показываем
+      if (!/already/i.test(String(error?.message ?? error))) {
+        console.warn('[dsh-nodes] язык ru не объявлен:', error)
+      }
+    }
+    try {
+      locale.register(NS, { en, ru, zh })
+    } catch (error) {
+      console.warn('[dsh-nodes] словари не зарегистрированы:', error)
+    }
+  }
+  try {
+    if (typeof ctx?.effect === 'function') ctx.effect(install, 'dsh-nodes: dictionaries')
+    else install()
+  } catch (error) {
+    console.warn('[dsh-nodes] словари не зарегистрированы:', error)
+  }
+  try {
+    translate = locale.bind(NS)
+  } catch (error) {
+    console.warn('[dsh-nodes] перевод не привязан:', error)
+  }
 }
 
 export function apply (ctx) {
@@ -603,13 +647,15 @@ export function apply (ctx) {
     const disposeStyles = mountStyles()
     if (typeof ctx?.effect === 'function') ctx.effect(() => disposeStyles)
 
+    mountLocale(ctx)
+
     const slots = ctx?.slots
     if (!slots?.register) {
       console.warn('[dsh-nodes] слоты недоступны: панель не смонтирована')
       return
     }
     slots.inject('settings.section', () => slots.register(
-      { name: 'settings.section', id: 'dsh-nodes', order: 35, label: () => t('nodes.title') },
+      { name: 'settings.section', id: 'dsh-nodes', order: 35, locale: NS, label: () => t('nodes.title') },
       NodesPanel,
     ))
   } catch (error) {
