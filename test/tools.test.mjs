@@ -32,7 +32,7 @@ after(() => {
 const byName = (name) => tools.find((tool) => tool.name === name)
 
 test('каждый render возвращает массив блоков', async () => {
-  assert.equal(tools.length, 5, 'четыре про узлы плюс nodes_copy')
+  assert.equal(tools.length, 4, 'передача теперь метод файлового API, отдельного инструмента нет')
   for (const tool of tools) {
     assert.equal(typeof tool.output.render, 'function', `${tool.name}: нет render`)
     const value = await tool.execute({ node: 1, api: 1, method: 'exec', data: {} }, { agent: null })
@@ -96,31 +96,6 @@ test('nodes_call принимает и номер, и алиас', async () => {
   assert.equal(byNumber.code, 'unknown_method')
   const byDigitString = await call.execute({ node: String(node.id), api: apiId, method: 'nope' }, { agent: null })
   assert.equal(byDigitString.code, 'unknown_method', 'число строкой тоже должно адресовать узел')
-})
-
-test('nodes_copy: узел→узел и self→self отклоняются понятным текстом', async () => {
-  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
-  const { tmpdir } = await import('node:os')
-  const { join } = await import('node:path')
-  const dir = mkdtempSync(join(tmpdir(), 'copy-tool-'))
-  writeFileSync(join(dir, 'src.bin'), Buffer.from([1, 2, 3]))
-
-  const localTools = createTools({
-    store, queue, config: {}, epoch: 1, sandboxFor: () => null,
-    sessionDir: async () => dir,
-  })
-  const copy = localTools.find((tool) => tool.name === 'nodes_copy')
-
-  // узел↔узел не поддерживаем: узлы друг друга не видят
-  const nodeToNode = await copy.execute({ from: 1, from_path: 'a', to: 2, to_path: 'b' }, {})
-  assert.ok(['unknown_node', 'bad_args'].includes(nodeToNode.code))
-
-  // хост↔хост — это обычный cp, инструмент не для этого
-  const selfToSelf = await copy.execute({ from: 'self', from_path: 'src.bin', to: 'self', to_path: 'dst.bin' }, {})
-  assert.equal(selfToSelf.code, 'bad_args')
-  assert.match(selfToSelf.message, /обычным cp/)
-
-  rmSync(dir, { recursive: true, force: true })
 })
 
 test('кусок копирования влезает в предел тела результата', async () => {

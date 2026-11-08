@@ -1,6 +1,6 @@
 {
   "name": "@dr-co/dsh-nodes",
-  "version": "0.0.91",
+  "version": "0.0.92",
   "description": "Run commands on remote machines from a DSH session: sandboxed (ro/rw/full), policy-controlled, audited",
   "type": "module",
   "main": "./index.mjs",
