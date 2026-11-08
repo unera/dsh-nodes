@@ -43,7 +43,7 @@ const op = (payload) => request('/op', { method: 'POST', body: JSON.stringify(pa
 
 const STYLE_ID = 'dsh-nodes-styles'
 const CSS = `
-.dshn { display: flex; flex-direction: column; gap: 16px; font-size: 14px; }
+.dshn { display: flex; flex-direction: column; gap: 16px; font-size: 14px; color: #f3f4f6; }
 .dshn h3 { font-size: 13px; letter-spacing: .04em; text-transform: uppercase; opacity: .6; margin: 0 0 8px; font-weight: 600; }
 .dshn table { width: 100%; border-collapse: collapse; }
 .dshn th, .dshn td { text-align: left; padding: 7px 8px; border-bottom: 1px solid rgba(128,128,128,.25); vertical-align: top; }
@@ -65,8 +65,10 @@ const CSS = `
 .dshn .pair .pane.qr { flex: 0 0 40%; max-width: 40%; }
 .dshn .token { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 13px; }
 .dshn .linkcode { font: 12px ui-monospace, monospace; color: #7dd3fc; word-break: break-all; }
-.dshn .help { margin-top: 12px; font-size: 12px; opacity: .55; }
-.dshn .help code { display: block; margin: 4px 0; color: #e5e7eb; opacity: 1; font-size: 13px; }
+.dshn .help { margin-top: 12px; font-size: 12px; opacity: .45; }
+.dshn .cmd { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.dshn .help .cmd code { margin: 0; }
+.dshn .help code { font-size: 13px; opacity: 1; }
 .dshn .qrbox { display: inline-flex; padding: 6px; background: #fff; border-radius: 8px; cursor: pointer; }
 .dshn .left { margin-top: 8px; text-align: center; font-size: 12px; }
 .dshn .pair .pane { flex: 1 1 240px; min-width: 200px; }
@@ -540,19 +542,24 @@ function NodesPanel () {
               key: 'b',
               className: 'primary',
               disabled: busy,
-              onClick: async () => { await run({ op: 'pair', body: { ttlSeconds: ttl } }, t('pair.ready')) },
+              onClick: async () => { await run({ op: 'pair', body: { ttlSeconds: ttl } }, '') },
             }, t('pair.make')),
           ]),
           secret
             ? h('div', { key: 'l2', className: 'row', style: { marginTop: 8 } }, [
-              h('span', { key: 'n', className: 'muted' }, `${t('pair.link')}:`),
-              h('a', { key: 'a', href: secret, className: 'linkcode' }, secret),
-              copyButton(secret, secret),
+              h('span', { key: 'n' }, `${t('pair.link')}:`),
+              // саму ссылку не печатаем: слово-ссылка даёт браузерное
+              // контекстное меню «копировать адрес» рядом с нашей кнопкой
+              h('a', { key: 'a', href: secret, className: 'linkcode' }, t('pair.linkReady')),
+              copyButton(secret, 'link'),
             ])
             : null,
           h('div', { key: 'help', className: 'help' }, [
             h('div', { key: 'p1' }, t('pair.help1')),
-            h('code', { key: 'c1' }, `dshnc connect ${secret ?? '<ссылка>'}`),
+            h('span', { key: 'cmd', className: 'cmd' }, [
+              h('code', { key: 'c1' }, 'dshnc connect <ссылка>'),
+              copyButton(`dshnc connect ${secret ?? ''}`.trim(), 'cmd'),
+            ]),
             h('div', { key: 'p2', className: 'muted' }, t('pair.help2')),
           ]),
         ]),
