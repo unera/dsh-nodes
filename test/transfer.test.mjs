@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
+import { Readable } from 'node:stream'
+
 import { Queue } from '../lib/queue.mjs'
 import { commandMode, inspect, receive, requireCommand, TransferError } from '../lib/transfer.mjs'
 
@@ -42,12 +44,15 @@ test('загрузка: тело пишется в .inprogress, сверяетс
     args: { path: target, size: body.length }, timeout: 30,
   })
   const command = requireCommand({ queue, node, method: 'files.upload', seq })
-  const request = new Request('http://x/api/dsh-nodes/upload-file', {
-    method: 'POST',
-    headers: { 'content-length': String(body.length), 'content-type': 'application/octet-stream' },
-    body,
+  // тело отдаём потоком, как это делает http-сервер
+  const stream = Readable.from([body])
+  const result = await receive({
+    stream,
+    headers: { 'content-length': String(body.length) },
+    command,
+    mode: commandMode(command, '644'),
+    config: {},
   })
-  const result = await receive({ request, command, mode: commandMode(command, '644'), config: {} })
   assert.equal(result.bytes, body.length)
   assert.equal(result.mode, 0o644)
   assert.deepEqual(readFileSync(target), body, 'байты должны совпасть')
@@ -59,9 +64,8 @@ test('размер из команды не совпал с content-length — �
   const { seq } = queue.enqueue({ nodeId: 1, api: 9, method: 'files.upload', args: { path: target, size: 99 }, timeout: 30 })
   const command = requireCommand({ queue, node, method: 'files.upload', seq })
   const body = Buffer.from('abc')
-  const request = new Request('http://x/u', { method: 'POST', headers: { 'content-length': '3' }, body })
   await assert.rejects(
-    () => receive({ request, command, mode: null, config: {} }),
+    () => receive({ stream: Readable.from([body]), headers: { 'content-length': '3' }, command, mode: null, config: {} }),
     (error) => error.status === 412 && /разошлись/.test(error.message),
   )
   assert.throws(() => readFileSync(target))
