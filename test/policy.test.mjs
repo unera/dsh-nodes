@@ -56,7 +56,7 @@ test('все сервисы, к которым обращаемся напрям
   assert.deepEqual(missing, [], `используются, но не объявлены в inject: ${missing.join(', ')}`)
 
   // обратная проверка: тест должен ловить реальную дыру, а не быть зелёным всегда
-  const broken = source.replace(", sandboxPolicy: null", "")
+  const broken = source.replace(/\n\s*sandboxPolicy:\s*null,/, "\n")
   const brokenNames = [...(/export const inject = \{([^}]*)\}/.exec(broken)?.[1] ?? '').matchAll(/(\w+)\s*:/g)].map((m) => m[1])
   assert.ok(!brokenNames.includes('sandboxPolicy'), 'подготовка: из inject убрать sandboxPolicy не удалось')
   const brokenUsed = new Set([...broken.matchAll(/ctx\.(\w+)/g)].map((match) => match[1]))
