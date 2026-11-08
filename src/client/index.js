@@ -54,13 +54,23 @@ const CSS = `
 .dshn button.primary { border-color: #3b82f6; color: #3b82f6; }
 .dshn button.danger { color: #ef4444; }
 .dshn button.glyph { padding: 4px 6px; display: inline-flex; align-items: center; justify-content: center; border-color: transparent; }
+.dshn button.copy.done { color: #22c55e; }
+.dshn button.copy.fail { color: #ef4444; }
 .dshn button.glyph:hover { background: rgba(128,128,128,.15); border-color: rgba(128,128,128,.4); }
 .dshn input, .dshn textarea { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; box-sizing: border-box; width: 100%; }
 .dshn .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dshn .muted { opacity: .6; }
-.dshn .pair { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.dshn .pair { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.dshn .pair .pane:first-child { flex: 1 1 55%; }
+.dshn .pair .pane.qr { flex: 0 0 40%; max-width: 40%; }
+.dshn .token { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 13px; }
+.dshn .linkcode { font: 12px ui-monospace, monospace; color: #7dd3fc; word-break: break-all; }
+.dshn .help { margin-top: 12px; font-size: 12px; opacity: .55; }
+.dshn .help code { display: block; margin: 4px 0; color: #e5e7eb; opacity: 1; font-size: 13px; }
+.dshn .qrbox { display: inline-flex; padding: 6px; background: #fff; border-radius: 8px; cursor: pointer; }
+.dshn .left { margin-top: 8px; text-align: center; font-size: 12px; }
 .dshn .pair .pane { flex: 1 1 240px; min-width: 200px; }
-.dshn .pair .qr { display: flex; justify-content: center; }
+.dshn .pair .pane.qr { display: flex; flex-direction: column; align-items: center; }
 .dshn .badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid rgba(128,128,128,.35); cursor: help; }
 /* режимы цветом: ro — красный, rw — синий, full — зелёный */
 .dshn .badge.ro { color: #ef4444; border-color: #ef444488; }
@@ -126,6 +136,42 @@ function uptimeText (seconds) {
  * серый, отсутствие связи — красный.
  */
 /** Как режим DSH называется человеку. */
+/** Токен показываем начало…конец: целиком он нужен только по кнопке. */
+function shortToken (token) {
+  if (!token || token.length < 14) return token
+  return `${token.slice(0, 3)}…${token.slice(-3)}`
+}
+
+/** Копирование в буфер с коротким сообщением о результате. */
+async function copyToClipboard (text, okText) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return okText
+  } catch {
+    return null
+  }
+}
+
+/** Кнопка «скопировать» со значком и подсказкой. */
+function copyButton (text, full) {
+  return h('button', {
+    key: 'c' + full.slice(0, 8),
+    className: 'glyph copy',
+    title: 'Копировать',
+    'aria-label': 'Копировать',
+    onClick: async (event) => {
+      event?.stopPropagation?.()
+      const ok = await copyToClipboard(text, 'ok')
+      // всплывашка: подтверждение прямо у кнопки, без общих сообщений панели
+      const target = event?.currentTarget
+      if (target) {
+        target.classList.add(ok ? 'done' : 'fail')
+        setTimeout(() => target.classList.remove('done', 'fail'), 1200)
+      }
+    },
+  }, '⧉')
+}
+
 /** Строка таблицы «что — как»: подпись и значение. */
 /** QR-код ссылки: на телефоне её удобнее навести камерой, чем копировать. */
 function renderQr (text) {
@@ -349,6 +395,15 @@ function NodesPanel () {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState({ text: '', kind: '' })
   const [secret, setSecret] = useState(null)
+  const [token, setToken] = useState(null)
+  const [expiresAt, setExpiresAt] = useState(null)
+  const [now, setNow] = useState(Date.now())
+
+  // обратный отсчёт перерисовываем раз в секунду, пока ссылка жива
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
   const [link, setLink] = useState(null)
   const [ttl, setTtl] = useState(600)
   const [newName, setNewName] = useState('')
@@ -410,8 +465,11 @@ function NodesPanel () {
     try {
       const result = await op(payload)
       say(okText, 'good')
-      if (result?.url) setSecret(result.url)
-      else if (result?.token) setSecret(result.token)
+      if (result?.url) {
+        setSecret(result.url)
+        setExpiresAt(result.expiresAt ?? null)
+      }
+      if (result?.token) setToken(result.token)
       if (result?.rejected?.length) say(t('err.aliasesTaken', { list: result.rejected.join(', ') }), 'bad')
       await load()
       return { ok: true }
@@ -462,45 +520,58 @@ function NodesPanel () {
       tabButton('audit', t('tab.audit')),
       tabButton('settings', t('tab.settings')),
     ]),
-    secret ? h('div', { key: 'secret', className: 'secret' }, `токен (показывается один раз): ${secret}`) : null,
 
     h('section', { key: 'pair', style: only('connections') }, [
       h('h3', { key: 'h' }, t('pair.title')),
-      h('div', { key: 'r', className: 'row' }, [
-        h('input', { key: 'ttl', type: 'number', value: ttl, style: { width: 90 }, onChange: (e) => setTtl(Number(e.target.value) || 600) }),
-        h('button', {
-          key: 'b',
-          className: 'primary',
-          disabled: busy,
-          onClick: async () => { await run({ op: 'pair', body: { ttlSeconds: ttl } }, t('pair.ready')) },
-        }, t('pair.make')),
-        h('span', { key: 's', className: 'muted' }, t('pair.ttl')),
-      ]),
-      secret
-        ? h('div', { key: 'pair2', className: 'pair' }, [
-          // слева — действие, а не текст ссылки: копировать в буфер удобнее,
-          // чем выделять строку на телефоне
-          h('div', { key: 'l', className: 'pane' }, [
-            h('div', { key: 't', className: 'muted' }, t('pair.linkReady')),
+      h('div', { key: 'cols', className: 'pair' }, [
+        // левый столбец: всё, что делает человек
+        h('div', { key: 'l', className: 'pane' }, [
+          token
+            ? h('div', { key: 'tk', className: 'token' }, [
+              h('span', { key: 'v' }, `${t('pair.token')}: ${shortToken(token)}`),
+              copyButton(token, token),
+            ])
+            : null,
+          h('div', { key: 'row', className: 'row' }, [
+            h('span', { key: 'lbl' }, t('pair.makeFor')),
+            h('input', { key: 'ttl', type: 'number', value: ttl, style: { width: 90 }, onChange: (e) => setTtl(Number(e.target.value) || 600) }),
+            h('span', { key: 'sec' }, t('pair.seconds')),
             h('button', {
-              key: 'copy',
+              key: 'b',
               className: 'primary',
-              onClick: async () => {
-                try {
-                  await navigator.clipboard.writeText(secret)
-                  say(t('pair.copied'), 'good')
-                } catch {
-                  say(t('pair.copyFailed'), 'bad')
-                }
-              },
-            }, t('pair.copy')),
-            h('div', { key: 'n', className: 'muted', style: { marginTop: 8 } }, t('pair.note')),
+              disabled: busy,
+              onClick: async () => { await run({ op: 'pair', body: { ttlSeconds: ttl } }, t('pair.ready')) },
+            }, t('pair.make')),
           ]),
-          h('div', { key: 'qr', className: 'pane qr' }, [
-            secret ? renderQr(secret) : null,
+          secret
+            ? h('div', { key: 'l2', className: 'row', style: { marginTop: 8 } }, [
+              h('span', { key: 'n', className: 'muted' }, `${t('pair.link')}:`),
+              h('a', { key: 'a', href: secret, className: 'linkcode' }, secret),
+              copyButton(secret, secret),
+            ])
+            : null,
+          h('div', { key: 'help', className: 'help' }, [
+            h('div', { key: 'p1' }, t('pair.help1')),
+            h('code', { key: 'c1' }, `dshnc connect ${secret ?? '<ссылка>'}`),
+            h('div', { key: 'p2', className: 'muted' }, t('pair.help2')),
           ]),
-        ])
-        : null,
+        ]),
+        // правый столбец: QR, клик по нему тоже копирует ссылку
+        h('div', { key: 'r', className: 'pane qr' }, secret
+          ? [
+            h('div', {
+              key: 'q',
+              className: 'qrbox',
+              title: t('pair.copy'),
+              onClick: () => copyToClipboard(secret, t('pair.copied')),
+            }, renderQr(secret)),
+            expiresAt
+              ? h('div', { key: 'left', className: 'left', },
+                t('pair.left', { seconds: Math.max(0, Math.round((expiresAt - now) / 1000)) }))
+              : null,
+          ]
+          : null),
+      ]),
     ]),
 
     h('section', { key: 'nodes', style: only('connections') }, [

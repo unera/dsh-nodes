@@ -10,6 +10,13 @@
 export const NS = 'dsh-nodes'
 
 export const en = {
+  'pair.token': 'Token',
+  'pair.link': 'Link',
+  'pair.makeFor': 'Generate a link for',
+  'pair.seconds': 'seconds',
+  'pair.help1': 'On the node run:',
+  'pair.help2': 'Nothing to confirm here — the code is single-use.',
+  'pair.left': '{seconds} s left',
   'pair.linkReady': 'Link is ready',
   'pair.copy': 'Copy to clipboard',
   'pair.copied': 'copied',
@@ -112,6 +119,13 @@ export const en = {
 }
 
 export const ru = {
+  'pair.token': 'Токен',
+  'pair.link': 'ссылка',
+  'pair.makeFor': 'Сгенерировать ссылку на',
+  'pair.seconds': 'секунд',
+  'pair.help1': 'На узле запустите:',
+  'pair.help2': 'Подтверждать здесь ничего не нужно, код одноразовый.',
+  'pair.left': 'осталось {seconds} сек',
   'pair.linkReady': 'Ссылка готова',
   'pair.copy': 'Скопировать в буфер',
   'pair.copied': 'скопировано',
@@ -214,6 +228,13 @@ export const ru = {
 }
 
 export const zh = {
+  'pair.token': '令牌',
+  'pair.link': '链接',
+  'pair.makeFor': '生成链接，有效期',
+  'pair.seconds': '秒',
+  'pair.help1': '在节点上运行：',
+  'pair.help2': '此处无需确认，代码只能使用一次。',
+  'pair.left': '剩余 {seconds} 秒',
   'pair.linkReady': '链接已生成',
   'pair.copy': '复制到剪贴板',
   'pair.copied': '已复制',
