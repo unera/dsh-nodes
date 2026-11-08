@@ -10,6 +10,13 @@
 export const NS = 'dsh-nodes'
 
 export const en = {
+  'tab.api': 'API',
+  'api.title': 'APIs',
+  'api.empty': 'no APIs announced yet',
+  'api.name': 'name',
+  'api.version': 'version',
+  'api.nodes': 'nodes',
+  'api.exporters': 'Announced by: ',
   'settings.selfSession': 'self — where files may be copied to',
   'settings.selfAlways': 'the session working directory, always allowed',
   'settings.selfExtra': 'additional host directories',
@@ -100,6 +107,13 @@ export const en = {
 }
 
 export const ru = {
+  'tab.api': 'API',
+  'api.title': 'API',
+  'api.empty': 'пока ни один узел ничего не объявил',
+  'api.name': 'имя',
+  'api.version': 'версия',
+  'api.nodes': 'узлы',
+  'api.exporters': 'Объявляют: ',
   'settings.selfSession': 'self — куда можно копировать файлы',
   'settings.selfAlways': 'рабочая директория сессии, разрешена всегда',
   'settings.selfExtra': 'дополнительные каталоги хоста',
@@ -190,6 +204,13 @@ export const ru = {
 }
 
 export const zh = {
+  'tab.api': 'API',
+  'api.title': 'API',
+  'api.empty': '还没有节点声明 API',
+  'api.name': '名称',
+  'api.version': '版本',
+  'api.nodes': '节点',
+  'api.exporters': '由以下节点提供：',
   'settings.selfSession': 'self — 可复制到何处',
   'settings.selfAlways': '会话工作目录，始终允许',
   'settings.selfExtra': '额外的宿主目录',

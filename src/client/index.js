@@ -328,6 +328,8 @@ function NodesPanel () {
   const [audit, setAudit] = useState([])
   const [settings, setSettings] = useState(null)
   const [tab, setTab] = useState('connections')
+  const [catalog, setCatalog] = useState([])
+  const [expanded, setExpanded] = useState(null)
   /** Секция видна только на своей вкладке. */
   const only = (name) => ({ display: tab === name ? 'block' : 'none' })
   const tabButton = (id, label) => h('button', {
@@ -358,6 +360,12 @@ function NodesPanel () {
         setSettings(await request('/settings'))
       } catch {
         setSettings(null)
+      }
+      try {
+        const list = await request('/catalog')
+        setCatalog(list.apis ?? [])
+      } catch {
+        setCatalog([])
       }
     } catch (error) {
       say(error.message, 'bad')
@@ -422,6 +430,7 @@ function NodesPanel () {
     // то, куда смотрят редко, настройки — то, что меняют один раз.
     h('div', { key: 'tabs', className: 'tabs' }, [
       tabButton('connections', t('tab.connections')),
+      tabButton('api', t('tab.api')),
       tabButton('audit', t('tab.audit')),
       tabButton('settings', t('tab.settings')),
     ]),
@@ -536,6 +545,44 @@ function NodesPanel () {
         style: { left: `${Math.round(tip.x)}px`, top: `${Math.round(tip.y)}px`, transform: 'translateX(-50%)' },
       }, tip.text)
       : null,
+
+    h('section', { key: 'api', style: only('api') }, [
+      h('h3', { key: 'h' }, t('api.title')),
+      catalog.length === 0
+        ? h('div', { key: 'e', className: 'empty' }, t('api.empty'))
+        : h('table', { key: 't' }, [
+          h('thead', { key: 'h' }, h('tr', null, [
+            h('th', { key: 'n' }, t('api.name')),
+            h('th', { key: 'v' }, t('api.version')),
+            h('th', { key: 'c' }, t('api.nodes')),
+          ])),
+          h('tbody', { key: 'b' }, catalog.flatMap((api) => {
+            const open = expanded === api.id
+            const rows = [h('tr', {
+              key: 'r' + api.id,
+              style: { cursor: 'pointer' },
+              onClick: () => setExpanded(open ? null : api.id),
+            }, [
+              h('td', { key: 'n' }, h('code', null, api.name)),
+              h('td', { key: 'v' }, String(api.version)),
+              h('td', { key: 'c' }, api.nodes.map((node) => node.name).join(', ') || '—'),
+            ])]
+            if (!open) return rows
+            rows.push(h('tr', { key: 'd' + api.id }, h('td', { colSpan: 3 }, [
+              h('div', { key: 'd', className: 'muted' }, api.description ?? ''),
+              h('ul', { key: 'm' }, api.methods.map((method) =>
+                h('li', { key: method.method }, [
+                  h('code', { key: 'c' }, method.method),
+                  method.description ? h('span', { key: 's', className: 'muted' }, ' — ' + method.description) : null,
+                  method.args ? h('div', { key: 'a', className: 'muted' }, Object.keys(method.args).join(', ')) : null,
+                ]))),
+              h('div', { key: 'who', className: 'muted' },
+                t('api.exporters') + api.nodes.map((node) => `${node.name}${node.online ? ' ●' : ''}`).join(', ')),
+            ])))
+            return rows
+          })),
+        ]),
+    ]),
 
     h('section', { key: 'audit', style: only('audit') }, [
       h('h3', { key: 'h' }, t('audit.title')),
