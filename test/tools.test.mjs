@@ -98,28 +98,29 @@ test('nodes_call принимает и номер, и алиас', async () => {
   assert.equal(byDigitString.code, 'unknown_method', 'число строкой тоже должно адресовать узел')
 })
 
-test('nodes_copy: узел→узел отклоняется, self→self копирует', async () => {
-  const { mkdtempSync, writeFileSync, readFileSync } = await import('node:fs')
+test('nodes_copy: узел→узел и self→self отклоняются понятным текстом', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
   const dir = mkdtempSync(join(tmpdir(), 'copy-tool-'))
-  writeFileSync(join(dir, 'src.bin'), Buffer.from([1, 2, 3, 250, 251]))
+  writeFileSync(join(dir, 'src.bin'), Buffer.from([1, 2, 3]))
 
-  // `self` по умолчанию — каталог сессии, поэтому инструментам нужен sessionDir
   const localTools = createTools({
     store, queue, config: {}, epoch: 1, sandboxFor: () => null,
     sessionDir: async () => dir,
   })
   const copy = localTools.find((tool) => tool.name === 'nodes_copy')
-  const both = await copy.execute({ from: 'self', from_path: join(dir, 'src.bin'), to: 'self', to_path: join(dir, 'dst.bin') }, {})
-  assert.equal(both.status, 'ok')
-  const payload = JSON.parse(both.results[0].text)
-  assert.equal(payload.size, 5)
-  assert.equal(readFileSync(join(dir, 'dst.bin')).length, 5)
 
+  // узел↔узел не поддерживаем: узлы друг друга не видят
   const nodeToNode = await copy.execute({ from: 1, from_path: 'a', to: 2, to_path: 'b' }, {})
-  // узлов в тестовом сторе нет — проверяем, что отказ внятный, а не падение
-  assert.ok(['unknown_node', 'bad_args'].includes(nodeToNode.code ?? 'unknown_node'))
+  assert.ok(['unknown_node', 'bad_args'].includes(nodeToNode.code))
+
+  // хост↔хост — это обычный cp, инструмент не для этого
+  const selfToSelf = await copy.execute({ from: 'self', from_path: 'src.bin', to: 'self', to_path: 'dst.bin' }, {})
+  assert.equal(selfToSelf.code, 'bad_args')
+  assert.match(selfToSelf.message, /обычным cp/)
+
+  rmSync(dir, { recursive: true, force: true })
 })
 
 test('кусок копирования влезает в предел тела результата', async () => {
