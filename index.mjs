@@ -31,7 +31,17 @@ export const name = 'dsh-nodes'
 // `Error: cannot get property "connection" without inject` и плагин не поднимется.
 // Каждый сервис, к которому обращаемся напрямую, обязан быть здесь: cordis
 // бросает «cannot get property X without inject». На этом мы попадались трижды.
-export const inject = { systemPrompt: null, tools: null, webServer: null, connection: null, sandboxPolicy: null, workingDirectory: null }
+export const inject = {
+  systemPrompt: null,
+  tools: null,
+  webServer: null,
+  connection: null,
+  sandboxPolicy: null,
+  workingDirectory: null,
+  // нужны, чтобы класть событие устройства в сессию и будить ход
+  sessions: null,
+  sessionController: null,
+}
 
 /** Конфиг плагина (план §10). */
 export const Config = z.object({
@@ -128,7 +138,13 @@ export function apply (ctx, config) {
     log('warn', `WebSocket недоступен (${error.message}); присутствие только по HTTP`)
   }
 
-  const server = createNodesServer({ store, queue, config, log, presence })
+  // сервисы сессий нужны, чтобы класть события устройств и будить ход;
+  // ctx.get — потому что в inject они объявлены, но могут отсутствовать
+  const services = {
+    sessions: ctx.sessions ?? null,
+    sessionController: ctx.sessionController ?? null,
+  }
+  const server = createNodesServer({ store, queue, config, log, presence, services })
 
   const disposers = []
   const register = (route) => {
