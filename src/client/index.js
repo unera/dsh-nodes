@@ -499,6 +499,10 @@ function NodesPanel () {
     setTip(null)
   }
 
+  // сколько ссылке осталось жить: по нулю её показывать уже нельзя
+  const secondsLeft = expiresAt ? Math.max(0, Math.round((expiresAt - now) / 1000)) : null
+  const linkAlive = Boolean(secret) && (secondsLeft === null || secondsLeft > 0)
+
   return h('div', {
     className: 'dshn',
     onMouseOver: showTipFor,

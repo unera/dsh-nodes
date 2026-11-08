@@ -129,3 +129,14 @@ test('панель строится без ошибок рендера на вс
   const src = String(bundle.apply)
   assert.ok(src.length > 0)
 })
+
+test('панель ссылается только на объявленные переменные рендера', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../src/client/index.js', import.meta.url), 'utf8')
+  // эти имена появились при правке разметки: если объявление не вставилось,
+  // панель падала целиком с «X is not defined»
+  for (const name of ['linkAlive', 'secondsLeft', 'expiresAt']) {
+    const declared = src.includes(`const ${name}`) || src.includes(`[${name},`) || src.includes(`const [${name}`)
+    assert.ok(declared, `${name} используется, но не объявлен`)
+  }
+})
