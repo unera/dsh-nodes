@@ -134,3 +134,27 @@ test('событие устройства: без сессии и текста �
 
   await new Promise((resolve) => srv.close(resolve))
 })
+
+test('повторный pair с тем же uuid переподключает узел, а не плодит новый', async () => {
+  const code1 = store.createPairing('probe-code-1', { ttlSeconds: 600 })
+  const first = await fetch(`${base}/v1/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: 'probe-code-1', uuid: 'uuid-same-device', name: 'phone' }),
+  })
+  assert.equal(first.status, 200)
+  const one = await first.json()
+
+  store.createPairing('probe-code-2', { ttlSeconds: 600 })
+  const second = await fetch(`${base}/v1/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: 'probe-code-2', uuid: 'uuid-same-device', name: 'phone' }),
+  })
+  assert.equal(second.status, 200)
+  const two = await second.json()
+
+  assert.equal(two.node, one.node, 'тот же uuid — тот же узел')
+  assert.equal(two.name, one.name, 'имя сохраняется при переподключении')
+  void code1
+})
