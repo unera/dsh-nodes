@@ -262,6 +262,9 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
         }),
         raw: true,
       },
+      // все действия панели идут одной операцией: создать, переименовать,
+      // удалить, выдать токен. Маршрута не было — панель получала 404
+      { path: '/api/dsh-nodes/op', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
       { path: '/api/dsh-nodes/nodes', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/nodes', {}) },
       { path: '/api/dsh-nodes/catalog', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/catalog', {}) },
       { path: '/api/dsh-nodes/pending', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/pending', {}) },

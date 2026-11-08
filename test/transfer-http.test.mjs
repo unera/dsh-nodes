@@ -89,3 +89,11 @@ test('upload-file принимает тело и сверяет размер', a
   assert.equal(answer.mode, 0o644)
   assert.deepEqual(readFileSync(path), body)
 })
+
+test('панель и сервер сходятся на маршруте операций', async () => {
+  // админ-маршруты живут в connection.fetch и в этом сервере не монтируются,
+  // поэтому проверяем статически: панель шлёт на /op, и маршрут должен быть
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../index.mjs', import.meta.url), 'utf8')
+  assert.match(source, /path: '\/api\/dsh-nodes\/op'/, 'маршрут /op не зарегистрирован — панель получит 404')
+})
