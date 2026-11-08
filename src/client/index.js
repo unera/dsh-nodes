@@ -545,7 +545,7 @@ function NodesPanel () {
               onClick: async () => { await run({ op: 'pair', body: { ttlSeconds: ttl } }, '') },
             }, t('pair.make')),
           ]),
-          secret
+          linkAlive
             ? h('div', { key: 'l2', className: 'row', style: { marginTop: 8 } }, [
               h('span', { key: 'n' }, `${t('pair.link')}:`),
               // саму ссылку не печатаем: слово-ссылка даёт браузерное
@@ -553,6 +553,9 @@ function NodesPanel () {
               h('a', { key: 'a', href: secret, className: 'linkcode' }, t('pair.linkReady')),
               copyButton(secret, 'link'),
             ])
+            : null,
+          secret && !linkAlive
+            ? h('div', { key: 'exp', className: 'muted', style: { marginTop: 8 } }, t('pair.expired'))
             : null,
           h('div', { key: 'help', className: 'help' }, [
             h('div', { key: 'p1' }, t('pair.help1')),
@@ -564,7 +567,7 @@ function NodesPanel () {
           ]),
         ]),
         // правый столбец: QR, клик по нему тоже копирует ссылку
-        h('div', { key: 'r', className: 'pane qr' }, secret
+        h('div', { key: 'r', className: 'pane qr' }, linkAlive
           ? [
             h('div', {
               key: 'q',
@@ -573,8 +576,7 @@ function NodesPanel () {
               onClick: () => copyToClipboard(secret, t('pair.copied')),
             }, renderQr(secret)),
             expiresAt
-              ? h('div', { key: 'left', className: 'left', },
-                t('pair.left', { seconds: Math.max(0, Math.round((expiresAt - now) / 1000)) }))
+              ? h('div', { key: 'left', className: 'left' }, t('pair.left', { seconds: secondsLeft }))
               : null,
           ]
           : null),

@@ -10,6 +10,7 @@
 export const NS = 'dsh-nodes'
 
 export const en = {
+  'pair.expired': 'The link has expired — generate a new one',
   'pair.token': 'Token',
   'pair.link': 'Link',
   'pair.makeFor': 'Generate a link for',
@@ -119,6 +120,7 @@ export const en = {
 }
 
 export const ru = {
+  'pair.expired': 'Ссылка истекла — сгенерируйте новую',
   'pair.token': 'Токен',
   'pair.link': 'ссылка',
   'pair.makeFor': 'Сгенерировать ссылку на',
@@ -228,6 +230,7 @@ export const ru = {
 }
 
 export const zh = {
+  'pair.expired': '链接已过期，请重新生成',
   'pair.token': '令牌',
   'pair.link': '链接',
   'pair.makeFor': '生成链接，有效期',
