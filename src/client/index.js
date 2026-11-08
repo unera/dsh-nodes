@@ -410,7 +410,8 @@ function NodesPanel () {
     try {
       const result = await op(payload)
       say(okText, 'good')
-      if (result?.token) setSecret(result.token)
+      if (result?.url) setSecret(result.url)
+      else if (result?.token) setSecret(result.token)
       if (result?.rejected?.length) say(t('err.aliasesTaken', { list: result.rejected.join(', ') }), 'bad')
       await load()
       return { ok: true }
