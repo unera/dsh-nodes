@@ -51,7 +51,7 @@ test('download-file отдаёт файл с размером и токеном 
   const path = join(dir, 'payload.bin')
   const body = Buffer.from([1, 2, 3, 250, 251, 13, 10])
   writeFileSync(path, body)
-  const { seq } = issue('files.download', { path: '/node/path', hostPath: path })
+  const { seq } = issue('files.copyToDevice', { path: '/node/path', hostPath: path })
   const res = await fetch(`${base}/v1/download-file?seq=${seq}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-length': '0' },
@@ -77,7 +77,7 @@ test('без команды — 403 с текстом, без токена — 4
 test('upload-file принимает тело и сверяет размер', async () => {
   const path = join(dir, 'incoming.bin')
   const body = Buffer.from('hello world')
-  const { seq } = issue('files.upload', { path: '/node/path', hostPath: path, size: body.length })
+  const { seq } = issue('files.copyFromDevice', { path: '/node/path', hostPath: path, size: body.length })
   const res = await fetch(`${base}/v1/upload-file?seq=${seq}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-length': String(body.length), 'x-mode': '644' },
