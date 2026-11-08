@@ -10,6 +10,11 @@
 export const NS = 'dsh-nodes'
 
 export const en = {
+  'pair.linkReady': 'Link is ready',
+  'pair.copy': 'Copy to clipboard',
+  'pair.copied': 'copied',
+  'pair.copyFailed': 'could not copy: select the field manually',
+  'pair.qr': 'Scan with the phone',
   'tab.api': 'API',
   'api.title': 'APIs',
   'api.empty': 'no APIs announced yet',
@@ -107,6 +112,11 @@ export const en = {
 }
 
 export const ru = {
+  'pair.linkReady': 'Ссылка готова',
+  'pair.copy': 'Скопировать в буфер',
+  'pair.copied': 'скопировано',
+  'pair.copyFailed': 'не смог скопировать: скопируй вручную',
+  'pair.qr': 'Наведи камеру телефона',
   'tab.api': 'API',
   'api.title': 'API',
   'api.empty': 'пока ни один узел ничего не объявил',
@@ -204,6 +214,11 @@ export const ru = {
 }
 
 export const zh = {
+  'pair.linkReady': '链接已生成',
+  'pair.copy': '复制到剪贴板',
+  'pair.copied': '已复制',
+  'pair.copyFailed': '复制失败',
+  'pair.qr': '用手机扫描',
   'tab.api': 'API',
   'api.title': 'API',
   'api.empty': '还没有节点声明 API',

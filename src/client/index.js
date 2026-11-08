@@ -14,6 +14,8 @@ import * as React from 'react'
 // а `class extends undefined` падает ещё до рендера — поэтому запасной вариант
 const Base = React.Component ?? Object
 
+import qrcode from 'qrcode-generator'
+
 import { NS, en, ru, zh } from './i18n.js'
 
 const BASE = '/api/dsh-nodes'
@@ -56,6 +58,9 @@ const CSS = `
 .dshn input, .dshn textarea { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; box-sizing: border-box; width: 100%; }
 .dshn .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dshn .muted { opacity: .6; }
+.dshn .pair { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.dshn .pair .pane { flex: 1 1 240px; min-width: 200px; }
+.dshn .pair .qr { display: flex; justify-content: center; }
 .dshn .badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid rgba(128,128,128,.35); cursor: help; }
 /* режимы цветом: ro — красный, rw — синий, full — зелёный */
 .dshn .badge.ro { color: #ef4444; border-color: #ef444488; }
@@ -122,6 +127,28 @@ function uptimeText (seconds) {
  */
 /** Как режим DSH называется человеку. */
 /** Строка таблицы «что — как»: подпись и значение. */
+/** QR-код ссылки: на телефоне её удобнее навести камерой, чем копировать. */
+function renderQr (text) {
+  const qr = qrcode(0, 'M')
+  qr.addData(text)
+  qr.make()
+  const size = qr.getModuleCount()
+  const cells = []
+  for (let row = 0; row < size; row += 1) {
+    for (let col = 0; col < size; col += 1) {
+      if (qr.isDark(row, col)) cells.push(h('rect', { key: `${row}-${col}`, x: col, y: row, width: 1, height: 1 }))
+    }
+  }
+  return h('svg', {
+    key: 'svg',
+    viewBox: `0 0 ${size} ${size}`,
+    width: 180,
+    height: 180,
+    shapeRendering: 'crispEdges',
+    style: { background: '#fff', borderRadius: 8 },
+  }, cells)
+}
+
 function row (what, value) {
   return h('tr', { key: what }, [
     h('td', { key: 'w', className: 'muted' }, what),
@@ -444,41 +471,35 @@ function NodesPanel () {
           key: 'b',
           className: 'primary',
           disabled: busy,
-          onClick: async () => {
-            try {
-              const result = await op({ op: 'pair', body: { ttlSeconds: ttl } })
-              setLink(result.url)
-              say(t('pair.ready'), 'good')
-            } catch (error) { say(error.message, 'bad') }
-          },
+          onClick: async () => { await run({ op: 'pair', body: { ttlSeconds: ttl } }, t('pair.ready')) },
         }, t('pair.make')),
-        h('span', { key: 't', className: 'muted' }, t('pair.ttl')),
+        h('span', { key: 's', className: 'muted' }, t('pair.ttl')),
       ]),
-      link ? h('div', { key: 'l', className: 'secret' }, link) : null,
-      h('div', { key: 'hint', className: 'muted', style: { fontSize: 12, marginTop: 6 } },
-        t('pair.note')),
-    ]),
-
-    h('section', { key: 'pending', style: only('connections') }, [
-      h('h3', { key: 'h' }, `${t('pending.title')} (${pending.length})`),
-      pending.length === 0
-        ? h('div', { key: 'e', className: 'empty' }, t('nodes.none'))
-        : h('table', { key: 't' }, [
-          h('thead', { key: 'head' }, h('tr', null, [
-            h('th', { key: 'n' }, t('nodes.name')), h('th', { key: 'i' }, 'id'), h('th', { key: 'a' }, t('pending.title')),
-            h('th', { key: 'w' }, t('state.hung')), h('th', { key: 'x' }, ''),
-          ])),
-          h('tbody', { key: 'body' }, pending.map((row) => h('tr', { key: row.uuid }, [
-            h('td', { key: 'n' }, row.name),
-            h('td', { key: 'i' }, h('code', null, row.short)),
-            h('td', { key: 'a' }, row.ip ?? '—'),
-            h('td', { key: 'w' }, `${row.waiting} ${t('unit.sec')}`),
-            h('td', { key: 'x' }, h('div', { className: 'row' }, [
-              h('button', { key: 'y', className: 'primary', disabled: busy, onClick: () => run({ op: 'approve', id: row.uuid }, t('pending.allowed')) }, t('pending.allow')),
-              h('button', { key: 'r', className: 'danger', disabled: busy, onClick: () => run({ op: 'reject', id: row.uuid }, t('pending.denied')) }, t('pending.deny')),
-            ])),
-          ]))),
-        ]),
+      secret
+        ? h('div', { key: 'pair2', className: 'pair' }, [
+          // слева — действие, а не текст ссылки: копировать в буфер удобнее,
+          // чем выделять строку на телефоне
+          h('div', { key: 'l', className: 'pane' }, [
+            h('div', { key: 't', className: 'muted' }, t('pair.linkReady')),
+            h('button', {
+              key: 'copy',
+              className: 'primary',
+              onClick: async () => {
+                try {
+                  await navigator.clipboard.writeText(secret)
+                  say(t('pair.copied'), 'good')
+                } catch {
+                  say(t('pair.copyFailed'), 'bad')
+                }
+              },
+            }, t('pair.copy')),
+            h('div', { key: 'n', className: 'muted', style: { marginTop: 8 } }, t('pair.note')),
+          ]),
+          h('div', { key: 'qr', className: 'pane qr' }, [
+            secret ? renderQr(secret) : null,
+          ]),
+        ])
+        : null,
     ]),
 
     h('section', { key: 'nodes', style: only('connections') }, [

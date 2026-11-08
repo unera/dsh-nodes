@@ -1,6 +1,6 @@
 {
   "name": "@dr-co/dsh-nodes",
-  "version": "0.0.99",
+  "version": "0.1.0",
   "description": "Run commands on remote machines from a DSH session: sandboxed (ro/rw/full), policy-controlled, audited",
   "type": "module",
   "main": "./index.mjs",
@@ -50,6 +50,7 @@
     "url": "git+https://github.com/unera/dsh-nodes.git"
   },
   "dependencies": {
+    "qrcode-generator": "^2.0.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {
