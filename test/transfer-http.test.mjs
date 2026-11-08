@@ -97,3 +97,40 @@ test('панель и сервер сходятся на маршруте опе
   const source = readFileSync(new URL('../index.mjs', import.meta.url), 'utf8')
   assert.match(source, /path: '\/api\/dsh-nodes\/op'/, 'маршрут /op не зарегистрирован — панель получит 404')
 })
+
+test('событие устройства: без сессии и текста — 400, с ними — доставлено', async () => {
+  const delivered = []
+  const services = {
+    sessions: { flush: async () => true },
+    sessionController: {
+      resolveAgent: async (id) => ({
+        agent: {
+          // заглушка агента: запоминаем, что именно положили в сессию
+          session: { id },
+          followup: (message) => delivered.push(message),
+        },
+      }),
+    },
+  }
+  const local = createNodesServer({ store, queue, config: {}, log: () => {}, services })
+  const srv = createServer((req, res) => { void local.handle(req, res) })
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${srv.address().port}/dsh-nodes`
+  const post = (body) => fetch(`${origin}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const empty = await post({})
+  assert.equal(empty.status, 400)
+
+  const ok = await post({ session: 'session-x', text: 'привет', button: 'reload' })
+  assert.equal(ok.status, 200)
+  assert.equal(delivered.length, 1, 'сообщение должно уйти агенту ровно один раз')
+  const text = delivered[0].content[0].text
+  assert.match(text, /кнопка «reload»/, 'в тексте должна быть кнопка')
+  assert.match(text, /session-x|привет/, 'и сам текст события')
+
+  await new Promise((resolve) => srv.close(resolve))
+})
