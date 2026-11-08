@@ -22,6 +22,7 @@ import { createPresence } from './lib/ws.mjs'
 import { renderAdmin } from './lib/admin.mjs'
 import { handleAdmin, handleAdminOp } from './lib/admin-api.mjs'
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
+import { TransferError, commandMode, commandPath, fileResponse, inspect, receive, requireCommand } from './lib/transfer.mjs'
 import { createTools } from './lib/tools.mjs'
 import { modeFromPolicy } from './lib/policy.mjs'
 
@@ -234,6 +235,42 @@ export function apply (ctx, config) {
  * Регистрация внутри `effect` до дела не доходит: маршрутов не появляется, а
  * панель получает 404.
  */
+/**
+ * Передача файла между узлом и хостом.
+ *
+ * Разрешение даёт выданная команда: узел предъявляет её номер, сервер сверяет,
+ * что команда его и ещё не закрыта. Путь и режим берутся из команды, поэтому
+ * подставить другой путь в запросе нельзя.
+ */
+async function handleTransfer ({ store, queue, config, kind }, request) {
+  try {
+    const header = request.headers.get('authorization') ?? ''
+    const match = /^Bearer (.+)$/.exec(header.trim())
+    if (!match) throw new TransferError(401, 'unauthorized', 'нужен Bearer-токен узла')
+    const node = store.nodeByToken(match[1])
+    if (!node) throw new TransferError(401, 'unauthorized', 'токен не подходит: узел не опознан')
+
+    const url = new URL(request.url)
+    const seq = url.searchParams.get('seq')
+    const method = kind === 'upload' ? 'files.upload' : 'files.download'
+    const command = requireCommand({ queue, node, method, seq })
+
+    if (kind === 'upload') {
+      const mode = commandMode(command, request.headers.get('x-mode'))
+      const result = await receive({ request, command, mode, config })
+      return json(200, { code: 'stored', ...result })
+    }
+
+    const info = inspect(commandPath(command))
+    return fileResponse(info)
+  } catch (error) {
+    const status = error instanceof TransferError ? error.status : 500
+    const code = error instanceof TransferError ? error.code : 'internal'
+    // текст отказа важен: модель читает его и понимает, что именно не так
+    return json(status, { code, message: error.message ?? String(error) })
+  }
+}
+
 function mountAdminRoutes ({ ctx, config, getDeps }) {
   const mount = (connection) => {
     if (connection === null || typeof connection?.fetch?.register !== 'function') {
@@ -268,6 +305,21 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
       // аудит читает панель; без маршрута раздел молча пустой
       { path: '/api/dsh-nodes/audit', methods: ['GET'], run: (deps, body, url) => handleAdmin(deps, 'GET', `/audit${url?.search ?? ''}`, {}) },
       { path: '/api/dsh-nodes/settings', methods: ['GET'], run: (deps) => handleAdmin(deps, 'GET', '/settings', {}) },
+      // Передача файлов: тело запроса — сами байты, разрешение даёт выданная
+      // команда (номер предъявляет узел), путь и режим лежат в её аргументах.
+      {
+        path: '/api/dsh-nodes/upload-file',
+        methods: ['POST'],
+        streaming: true,
+        run: (deps, request) => handleTransfer({ ...deps, kind: 'upload' }, request),
+      },
+      {
+        path: '/api/dsh-nodes/download-file',
+        methods: ['POST'],
+        streaming: true,
+        run: (deps, request) => handleTransfer({ ...deps, kind: 'download' }, request),
+      },
+
       { path: '/api/dsh-nodes/op', methods: ['POST'], run: (deps, body) => handleAdminOp(deps, body) },
     ]
 
@@ -277,12 +329,13 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
         connection.fetch.register({
           path: route.path,
           methods: route.methods,
-          requestBody: 'buffered',
+          // передача файлов идёт потоком: тело нельзя буферизовать в память
+          requestBody: route.streaming ? 'streaming' : 'buffered',
           fetch: async (request) => {
             try {
               const deps = depsOf(request)
               if (!deps) return json(503, { code: 'starting', message: 'плагин ещё поднимается' })
-              if (route.raw) return route.run(request)
+              if (route.streaming) return route.run(deps, request)
               const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
               const result = await route.run(deps, body)
               return json(result.status, result.body)
