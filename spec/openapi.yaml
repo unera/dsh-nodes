@@ -74,6 +74,8 @@ x-client-methods:
     - sha256
     - copyToDevice
     - copyFromDevice
+  notifications:
+    - post
   session:
     - ping
     - version

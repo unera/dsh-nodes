@@ -32,7 +32,11 @@ after(() => {
 const byName = (name) => tools.find((tool) => tool.name === name)
 
 test('каждый render возвращает массив блоков', async () => {
-  assert.equal(tools.length, 4, 'передача теперь метод файлового API, отдельного инструмента нет')
+  // четыре инструмента работы с узлами плюс уведомления; передачи файлов
+  // отдельным инструментом нет — это метод файлового API
+  assert.deepEqual(tools.map((tool) => tool.name).sort(),
+    ['nodes_api', 'nodes_call', 'nodes_catalog', 'nodes_list', 'nodes_notify'])
+  assert.equal(tools.length, 5)
   for (const tool of tools) {
     assert.equal(typeof tool.output.render, 'function', `${tool.name}: нет render`)
     const value = await tool.execute({ node: 1, api: 1, method: 'exec', data: {} }, { agent: null })
