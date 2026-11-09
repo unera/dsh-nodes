@@ -45,6 +45,45 @@ tags:
   - name: presence
     description: WebSocket used only for cheap wake-ups
 
+
+# Кадры websocket. Список машиночитаемый: тест сверяет его с кодом, чтобы
+# схема не отставала от реализации.
+x-ws-frames:
+  - hello
+  - hello-ok
+  - check_state
+  - alive
+  - state
+  - ping
+  - pong
+  - work
+  - error
+
+# Методы, которые объявляют клиентские API. Список сверяется тестом с
+# описаниями в репозитории клиента: так schema догоняет код сразу, а не через
+# неделю.
+x-client-methods:
+  files:
+    - roots
+    - list
+    - stat
+    - read
+    - write
+    - edit
+    - mkdir
+    - sha256
+    - copyToDevice
+    - copyFromDevice
+  session:
+    - ping
+    - version
+    - id
+    - cwd
+    - chdir
+    - mkdir
+    - approve
+    - debug_info
+
 paths:
   /v1/enroll:
     post:
@@ -299,6 +338,110 @@ paths:
       responses:
         "101":
           description: switched to the WebSocket protocol
+
+  /v1/events:
+    post:
+      tags: [devices]
+      summary: Событие устройства
+      description: |
+        Узел сообщает, что на устройстве что-то произошло: нажата кнопка в
+        уведомлении, сработал будильник, пришёл сигнал от человека.
+
+        Имя устройства, время и обрамление добавляет сервер: клиенту нельзя
+        доверять трактовку смысла, он сообщает только факт. Событие кладётся в
+        указанную сессию как пользовательское сообщение с источником
+        `dsh-nodes`, после чего ход просыпается.
+
+        Ответ приходит до того, как модель начнёт работу: иначе устройство
+        ждало бы окончания хода.
+      security:
+        - nodeToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session, text]
+              properties:
+                session:
+                  type: string
+                  description: Идентификатор сессии вида `session-<uuid>`
+                text:
+                  type: string
+                button:
+                  type: string
+                  description: Метка нажатой кнопки, если событие из уведомления
+                purpose:
+                  type: string
+                  description: Зачем это событие — модель увидит это первым
+                id:
+                  type: string
+                  description: Идентификатор события для дедупликации
+      responses:
+        '200':
+          description: Событие принято и передано агенту
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivered: { type: boolean }
+                  session: { type: string }
+                  device: { type: string }
+        '400':
+          description: Нет сессии или текста
+        '403':
+          description: Для устройства события выключены
+        '404':
+          description: Сессии больше нет
+
+  /v1/upload-file:
+    post:
+      tags: [transfer]
+      summary: Передать файл с узла на сервер (хост)
+      description: |
+        Один HTTP-запрос вместо прежних кусков. Требуется `content-length` и
+        `seq` в параметрах запроса; данные пишутся в `<path>.inprogress` и
+        переименовываются только после сверки sha256.
+      security:
+        - nodeToken: []
+      parameters:
+        - name: seq
+          in: query
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Файл принят, sha256 совпал
+        '400':
+          description: Нет длины, имени или seq
+
+  /v1/download-file:
+    post:
+      tags: [transfer]
+      summary: Передать файл с сервера (хоста) на узел
+      description: |
+        Симметричен выгрузке: сервер отдаёт поток, узел сохраняет его через
+        `.inprogress` и проверяет sha256 перед переименованием.
+      security:
+        - nodeToken: []
+      parameters:
+        - name: seq
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Поток файла
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
 
 components:
   securitySchemes:
