@@ -991,7 +991,10 @@ t('остановленный клиент сразу перестаёт быт�
   const detached = adminApi.handleAdmin({ store, queue, config: CONFIG, presence: { online: () => false } }, 'GET', '/nodes')
   const second = detached.body.nodes.find((node) => node.id === nodeId)
   assert.equal(second.attached, false, 'присоединения нет сразу, без ожидания таймаута')
-  assert.equal(second.online, true, 'свежесть связи ещё держит прежний признак online')
+  // онлайн теперь означает именно открытый канал: свежая отметка времени не
+  // делает остановленный узел онлайн (иначе он «мигал» между пингами)
+  assert.equal(second.online, false, 'без сокета узел не онлайн, даже если связь была недавно')
+  assert.ok(second.lastSeen, 'время последней связи остаётся отдельным фактом')
 })
 
 t('sandboxStrict: отказ человека не запускает команду вовсе', async () => {
