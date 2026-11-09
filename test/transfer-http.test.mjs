@@ -208,3 +208,79 @@ test('нажатие кнопки приходит подписью, а не м�
     await new Promise((resolve) => srv.close(resolve))
   }
 })
+
+test('пайп: поток без content-length принимается, но ждёт вердикта', async () => {
+  const { existsSync, readFileSync, rmSync } = await import('node:fs')
+  const hostPath = join(dir, 'pipe-test.out')
+  rmSync(hostPath, { force: true })
+  rmSync(`${hostPath}.inprogress`, { force: true })
+  // команду выдаём тому же узлу, чей токен используется в запросе
+  const { seq } = issue('pipeFromDevice', { command: 'echo', hostPath })
+  const logs = []
+  try {
+    const answer = await fetch(`${base}/v1/upload-file?seq=${seq}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' },
+      body: new ReadableStream({
+        start (controller) {
+          controller.enqueue(new TextEncoder().encode('строка из скрипта'))
+          controller.close()
+        },
+      }),
+      duplex: 'half',
+    })
+    assert.equal(answer.status, 200)
+    const body = await answer.json()
+    assert.equal(body.pending, true, 'поток не финализируется до вердикта')
+    assert.ok(existsSync(`${hostPath}.inprogress`), 'данные лежат во временном файле')
+    assert.ok(!existsSync(hostPath), 'целевой файл ещё не создан')
+
+    const closed = await fetch(`${base}/v1/commands/${seq}/result`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ok: true, pendingPath: `${hostPath}.inprogress`, results: [] }),
+    })
+    assert.equal(closed.status, 200, `закрытие команды: ${closed.status} ${await closed.text()}`)
+    assert.ok(existsSync(hostPath), 'после успеха файл на месте')
+    assert.match(readFileSync(hostPath, 'utf8'), /строка из скрипта/)
+    assert.ok(!existsSync(`${hostPath}.inprogress`), 'временный файл убран')
+  } finally {
+    rmSync(hostPath, { force: true })
+    rmSync(`${hostPath}.inprogress`, { force: true })
+  }
+})
+
+
+test('пайп: отказ по вердикту удаляет временный файл', async () => {
+  const { existsSync, rmSync, writeFileSync } = await import('node:fs')
+  const hostPath = join(dir, 'pipe-fail.out')
+  rmSync(hostPath, { force: true })
+  const { seq } = issue('pipeFromDevice', { command: 'false', hostPath })
+  try {
+    const answer = await fetch(`${base}/v1/upload-file?seq=${seq}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' },
+      body: new ReadableStream({
+        start (controller) {
+          controller.enqueue(new TextEncoder().encode('частичный вывод'))
+          controller.close()
+        },
+      }),
+      duplex: 'half',
+    })
+    assert.equal(answer.status, 200)
+    assert.ok(existsSync(`${hostPath}.inprogress`), 'пока вердикта нет, данные лежат')
+
+    const closed = await fetch(`${base}/v1/commands/${seq}/result`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ok: false, code: 'exit_nonzero', pendingPath: `${hostPath}.inprogress`, results: [] }),
+    })
+    assert.equal(closed.status, 200)
+    assert.ok(!existsSync(`${hostPath}.inprogress`), 'при отказе временный файл удалён')
+    assert.ok(!existsSync(hostPath), 'целевого файла при отказе быть не должно')
+  } finally {
+    rmSync(hostPath, { force: true })
+    rmSync(`${hostPath}.inprogress`, { force: true })
+  }
+})
