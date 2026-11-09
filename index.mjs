@@ -54,7 +54,10 @@ export const Config = z.object({
   maxQueuePerNode: z.natural().default(100).description('Потолок незакрытых команд на узел'),
   maxBodyBytes: z.natural().default(1048576).description('Потолок тела запроса'),
   aliveTimeoutSeconds: z.natural().default(60).description('Сколько без обращений считать узел живым'),
-  wsPingSeconds: z.natural().default(0).description('Период пинга по сокету; 0 — не пинговать'),
+  // Пинг по сокету включён по умолчанию: без него полумёртвое соединение
+  // (сеть пропала, а TCP никто не закрыл) висит в присутствии как живое, и
+  // команды уходят в пустоту до таймаута. 0 — отключить.
+  wsPingSeconds: z.natural().default(30).description('Период пинга по сокету; 0 — не пинговать'),
   // каталоги на хосте DSH, куда разрешено копировать файлы с узлов; пусто —
   // `self` выключен, и это осознанное умолчание: иначе модель писала бы на хост
   selfRoots: z.array(z.string()).default([]).description('Каталоги хоста для self; пусто — self выключен'),
