@@ -158,3 +158,53 @@ test('повторный pair с тем же uuid переподключает �
   assert.equal(two.name, one.name, 'имя сохраняется при переподключении')
   void code1
 })
+
+
+test('нажатие кнопки приходит подписью, а не машинным номером', async () => {
+  const delivered = []
+  const services = {
+    sessions: { flush: async () => true },
+    sessionController: {
+      resolveAgent: async (id) => ({
+        agent: { session: { id }, followup: (message) => delivered.push(message) },
+      }),
+    },
+  }
+  const local = createNodesServer({ store, queue, config: {}, log: () => {}, services })
+  const srv = createServer((req, res) => { void local.handle(req, res) })
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${srv.address().port}/dsh-nodes`
+
+  const node = store.createNode({ name: 'phone-press' }).node
+  const api = store.announce(node.id, [{
+    name: 'notifications',
+    version: 'android-test',
+    methods: [{ method: 'post', args: { type: 'object' } }],
+  }])
+  store.createNotification({
+    id: 'n-test',
+    node: node.id,
+    session: 'session-x',
+    purpose: 'проверка кнопок',
+    title: 'Перезагрузить?',
+    text: 'текст',
+    buttons: [{ id: 'b1', label: 'да' }, { id: 'b2', label: 'нет' }],
+  })
+  void api
+
+  try {
+    const answer = await fetch(`${origin}/v1/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ notification: 'n-test', button: 'b1', text: 'нажата кнопка' }),
+    })
+    assert.equal(answer.status, 200)
+    const message = delivered[0].content[0].text
+    assert.match(message, /кнопка «да»/, 'должна быть подпись кнопки, а не b1')
+    assert.match(message, /проверка кнопок/, 'смысл берётся из записи сервера')
+    assert.ok(!/b1/.test(message), 'машинный номер человеку не показываем')
+  } finally {
+    // сервер закрываем всегда: незакрытый держал процесс и тест «висел»
+    await new Promise((resolve) => srv.close(resolve))
+  }
+})
