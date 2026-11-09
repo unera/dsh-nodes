@@ -284,3 +284,22 @@ test('пайп: отказ по вердикту удаляет временны
     rmSync(`${hostPath}.inprogress`, { force: true })
   }
 })
+
+test('поддельный pendingPath не может удалить чужой файл', async () => {
+  const { existsSync, writeFileSync, rmSync } = await import('node:fs')
+  const victim = join(dir, 'victim.txt')
+  writeFileSync(victim, 'не трогать')
+  // команда обычная (exec), пайпа не было: путь из тела должен игнорироваться
+  const { seq } = issue('exec', { command: 'true' })
+  try {
+    const closed = await fetch(`${base}/v1/commands/${seq}/result`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ok: false, pendingPath: victim, results: [] }),
+    })
+    assert.equal(closed.status, 200)
+    assert.ok(existsSync(victim), 'файл не должен быть удалён по пути из тела')
+  } finally {
+    rmSync(victim, { force: true })
+  }
+})
