@@ -5,22 +5,67 @@ behaves. Read this before adding a route, a frame or a tool.
 
 ## WebSocket carries state, not events
 
-The socket exists to tell a node that the server's state changed, and to hear
-back which state the node already knows. That is the entire design: a node that
-is idle and a server that is idle exchange nothing, and the queue is never
-polled.
+The socket exists to tell a node that the server's state changed, and to hear that
+the node is waiting and which generation it lives in. That is the entire design: a
+node that is idle and a server that is idle exchange nothing, and the queue is
+never polled.
 
-- The server sends `hello-ok`, `state`.
-- The node sends `hello`, `check_state` (`alive` is the old name, still read).
-- `state` is a single number. It is not a payload, not a command, not a
-  notification. Everything that must be delivered goes through the command
-  queue over HTTP, which has back-pressure, retries and a timeout of its own.
+Frames, exactly two in each direction:
+
+| direction | frame | meaning |
+| --- | --- | --- |
+| client → server | `{t:"state", epoch, client_epoch, max_commandno}` | "I am alive and waiting, my generation is this, I know commands up to N" |
+| client → server | `{t:"ping", no}` | keepalive |
+| server → client | `{t:"state", epoch, max_commandno}` | "my number is higher than yours, go fetch" |
+| server → client | `{t:"pong", no}` | answer to the keepalive |
+
+There is no handshake frame. Everything a node says about itself — access, workdir,
+approver, uptime, client version — travels in `announce`, and it arrives exactly
+when the node declares itself rather than when a socket happens to open. `state` is
+a number and a generation: it is not a payload, not a command, not a notification.
+Everything that must be delivered goes through the command queue over HTTP, which
+has back-pressure, retries and a timeout of its own.
+
+Saying "I am waiting" again is always safe, and the client must be ready to hear
+the answer *before* it asks: subscribe to the frame first, then send `state`.
+Otherwise the reply can arrive in the gap, find nobody to wake, and the node sleeps
+with work waiting in the queue. Nothing will ask a second time.
 
 **The only exception is `ping`/`pong`.** It exists for one purpose: detect a
 dead connection. There is no "ping means something else", no data attached, and
 on failure the node drops the socket and reconnects. Do not add frames that
 carry commands, do not send cancellation, presence updates or file data over
-the socket.
+the socket. An unknown frame closes the socket with `4400`: a client that speaks
+another protocol must not be silently tolerated.
+
+## The generation is the identity
+
+Two counters keep the two sides apart, and neither can be inferred from the other.
+
+`epoch` is the server's: it changes on every server restart. It is the identity
+token of a connection, and every request that hands out work carries it.
+
+`client_epoch` is the client's: a persistent counter, incremented on every
+connection — reconnects and restarts alike — and stored per node in SQLite, so it
+survives a server restart.
+
+| statement | answer |
+| --- | --- |
+| `announce` with the current `epoch` | accepted |
+| `announce` with `epoch: null` | the client lost its state: every `processing` command of that node is closed as `node_restarted`, then the announce proceeds |
+| `announce` or `commands` with a different `epoch` | `409 epoch-mismatch`, nothing is written and nothing is handed out |
+| `announce` or `commands` with a lower `client_epoch` | `409 client-epoch-stale` |
+| `state` frame with a wrong or missing `epoch` | socket closed with `4409`, reason `epoch` |
+| `state` frame with a lower `client_epoch` | socket closed with `4001`, reason `client-epoch` |
+
+**`failInFlight` lives in announce and nowhere else.** A socket comes and goes for
+reasons that lose nothing (NAT, a sleeping phone, a network change), so a frame may
+never be a statement about the client's process. Only `epoch: null` in announce says
+"I restarted and lost everything", and only that closes in-flight commands.
+
+A `max_commandno` that does not match the server's own number is a claim, not an
+identity: it is logged (warn, with both numbers) and no more. The reaction is not
+decided yet, so do not build one on top of it.
 
 ## Reserved names start with `#`
 
@@ -32,9 +77,9 @@ Reserved names live in a separate namespace (`internal`), not in a node's API.
 
 ## Special rules
 
-How a client must drive work — two channels, the fetch loop, ping and reconnect —
-lives in `spec/CLIENT-LOOP.md`. That file is the reference for the behaviour under
-load, not for the wire format.
+How a client must drive work — two channels, the order announce → socket → commands,
+the fetch loop, ping and reconnect — lives in `spec/CLIENT-LOOP.md`. That file is the
+reference for the behaviour under load, not for the wire format.
 
 Some methods need the server to do more than pass them through: measure their
 time, or make sure nothing else runs around them. The fixed set of such rules
@@ -67,15 +112,6 @@ Control commands (`#…`) are no exception either: they take a pool slot like an
 other command and differ only in priority — `#INTERNAL.CANCEL` at 10,
 `#INTERNAL.APPROVE` at 5, user work at 0. The barrier `#INTERNAL.FLUSH` inherits
 the priority of the command it was placed for.
-
-## The socket carries state, not events
-
-`state` is a number, not a notification: the server sends it when it sees
-`state > known`, and asking again is always safe. That removes the whole class of
-"the event was lost" problems — but only if the client is ready to hear the
-answer *before* it asks. Subscribe to the frame first, then send `check_state`;
-otherwise the reply can arrive in the gap, find nobody to wake, and the node
-sleeps with work waiting in the queue. Nothing will ask a second time.
 
 ## Control commands travel through the queue
 
@@ -121,10 +157,12 @@ control which file the server deletes.
 
 ## Ephemeral state
 
-Nodes, tokens, APIs, aliases, notifications, audit and `epoch` are in SQLite.
-The command queue and its `seq` counter are in memory: after a restart the queue
-is empty, the `epoch` changes, and every client resets its cursor. Do not
-persist `seq` — it buys nothing and creates gaps.
+Nodes, tokens, APIs, aliases, notifications, audit, the server's `epoch` and the
+client's `client_epoch` are in SQLite. The command queue and its `seq` counter are
+in memory: after a restart the queue is empty and the `epoch` changes, so every
+client announces itself again. `client_epoch` deliberately stays on disk: it is
+what makes a stale instance of a node recognisable after the server itself
+restarted. Do not persist `seq` — it buys nothing and creates gaps.
 
 ## Versions
 

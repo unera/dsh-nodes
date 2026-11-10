@@ -33,8 +33,13 @@ model ──nodes_call──▶ plugin ──queue──▶ client on the node �
   gets an answer instead of silence.
 * Results are accepted late. A model that already saw a timeout does not break
   anything.
-* Presence rides a WebSocket (`/v1/ws`): a tiny `state` frame means "there is
-  work, go fetch it". Command data always travels over HTTP.
+* Presence rides a WebSocket (`/v1/ws`) and speaks exactly two frames each way:
+  the client sends `state` ("I am waiting, generation is this") and `ping`, the
+  server answers `state` ("there is work, go fetch it") and `pong`. The server
+  generation `epoch` is the identity token of a connection, and the client's own
+  `client_epoch` keeps an older instance of a node from pushing out a newer one.
+  Only `announce` with `epoch: null` closes in-flight commands. Command data
+  always travels over HTTP.
 
 ## Install
 
