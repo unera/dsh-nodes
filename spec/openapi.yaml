@@ -94,7 +94,7 @@ x-protocol-rules:
   control-prefix: "#"
   control-api: -1
   control-namespace: internal
-  control-example: "#INTERNAL.CANCEL"
+  control-example: '#INTERNAL.CANCEL'
   control-ttl-seconds: 86400
   control-tolerates: [late delivery, duplicates, missing target]
   commands-are-tickets: transfer routes are authorised by the served command
