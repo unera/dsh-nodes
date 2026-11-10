@@ -14,9 +14,17 @@ nodes_api(api)    → methods of one API with their argument schemas
 nodes_call(node, api, method, data, timeout?, sandbox?)
 ```
 
-The pair is two packages: this plugin (server side) and
-[`dsh-node-client`](https://github.com/unera/dsh-node-client) (`dshnc`, runs on
-the node).
+The pair is two packages: this plugin (server side) and a client that runs on
+the node. Two clients are shipped and both speak the same protocol — pick
+whichever machine you want to reach:
+
+| Client | What it runs on | Where it lives |
+| --- | --- | --- |
+| `@dr-co/dsh-node-client` | a desktop or a server: Linux, macOS, `systemd`, `bwrap` sandbox, shell jobs, file transfers, approval dialogs | [GitHub](https://github.com/unera/dsh-node-client) · [npm](https://www.npmjs.com/package/@dr-co/dsh-node-client) |
+| `dshnc` for Android | a phone: shell with the app's own permissions, files, camera, apps, notifications, and questions to the person (`dialog.ask`) | [GitHub](https://github.com/unera/dsh-node-client-android) |
+
+Install the desktop one with `npm install -g @dr-co/dsh-node-client`; the Android
+one is an APK from the releases page of its repository.
 
 ## How it works
 
