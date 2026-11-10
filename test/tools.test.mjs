@@ -170,6 +170,31 @@ test('a client cannot announce a service method with a hash', () => {
   assert.match(answer.warnings.join(' '), /зарезервированы/)
 })
 
+test('a failure inside the announce transaction rolls the node fields back too', () => {
+  // the server refuses everything it can check before the transaction; this is the last
+  // line: the node patch goes into the same BEGIN as the apis and the bindings, so a
+  // failure while binding the rules must leave the node exactly as it was
+  const created = store.createNode({ name: 'rollback-node', access: 'read-only' })
+  const before = store.node(created.node.id)
+  assert.throws(
+    () => store.announce(
+      created.node.id,
+      [{ name: 'shell', version: 'r1', methods: [{ method: 'exec', args: { type: 'object' } }] }],
+      // no such api in the declaration: the transaction throws while writing the rules
+      [{ api: 'ghost', version: null, method: 'exec', rule: 'timing', opts: null }],
+      { access: 'danger-full-access', platform: 'android', client_epoch: 3, workdir: '/tmp/x' },
+    ),
+    (error) => error.code === 'apply-rules-invalid',
+  )
+  const after = store.node(created.node.id)
+  assert.equal(after.access, 'read-only', 'потолок прав откатывается вместе с транзакцией')
+  assert.equal(after.platform, null, 'platform откатывается вместе с транзакцией')
+  assert.equal(after.client_epoch, null, 'поколение клиента откатывается вместе с транзакцией')
+  assert.equal(after.workdir, before.workdir)
+  assert.deepEqual(store.nodeApis(created.node.id), [], 'apis не записались')
+  assert.deepEqual(store.nodeRules(created.node.id), [], 'биндинги не записались')
+})
+
 test('the flushAround rule reaches the queue as barriers', async () => {
   const { node } = store.createNode({ name: 'flush-node', access: 'danger-full-access' })
   store.announce(node.id, [{
