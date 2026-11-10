@@ -201,6 +201,10 @@ export function apply (ctx, config) {
     )
 
 
+  // управляющие команды (CANCEL) должны будить узел так же, как обычные:
+  // иначе отмена ждёт, пока клиент проснётся сам
+  queue.setNotify?.((nodeId) => presence?.notify(nodeId))
+
   const tools = createTools({
     store,
     queue,

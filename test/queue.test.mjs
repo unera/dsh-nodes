@@ -97,3 +97,43 @@ test('потерянный барьер не держит очередь веч�
   assert.equal(queue.info(1).queued, 0)
   void barrier
 })
+
+test('аборт вызова просит узел остановиться', () => {
+  const queue = new Queue({ epoch: 1 })
+  const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { command: 'sleep 120' } })
+  // команду уже выдали: она в работе на узле
+  assert.equal(queue.take(1).commands[0].seq, seq)
+  assert.equal(queue.cancel(1, seq), true)
+
+  const next = queue.take(1, { limit: 5 }).commands
+  assert.equal(next.length, 1, 'узел должен получить управляющую команду')
+  assert.equal(next[0].method, '#INTERNAL.CANCEL')
+  assert.equal(next[0].api, -1)
+  assert.equal(next[0].args.seq, seq, 'отменяем именно ту команду, которую взяли')
+})
+
+test('аборт ждущей команды не шлёт CANCEL: узел её не видел', () => {
+  const queue = new Queue({ epoch: 1 })
+  const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
+  assert.equal(queue.cancel(1, seq), true)
+  assert.deepEqual(queue.take(1).commands, [], 'незачем будить узел ради того, чего он не брал')
+})
+
+test('поздний результат после таймаута — это «уже закрыта», а не «нет команды»', () => {
+  const queue = new Queue({ epoch: 1 })
+  const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {}, timeout: 0.01 })
+  queue.take(1)
+  const node = queue.nodes.get(1)
+  const command = node.queue.find((item) => item.seq === seq)
+  command.takenAt = Date.now() - 60_000
+  queue.sweep(Date.now() + 70_000)
+  assert.equal(queue.close(1, seq, { ok: true, results: [] }), 'already')
+})
+
+test('управляющая команда будит узел, а не ждёт, пока он проснётся сам', () => {
+  const queue = new Queue({ epoch: 1 })
+  const woken = []
+  queue.setNotify((nodeId) => woken.push(nodeId))
+  queue.control(1, '#INTERNAL.CANCEL', { seq: 7, reason: 'timeout' })
+  assert.deepEqual(woken, [1], 'без побудки отмена лежит в очереди до случайного просыпания')
+})
