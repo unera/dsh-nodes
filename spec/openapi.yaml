@@ -16,7 +16,7 @@ info:
   description: |
     How a node talks to a DSH server.
 
-    Three behaviours deserve attention because a client that gets them wrong will
+    Four behaviours deserve attention because a client that gets them wrong will
     look like it works and then quietly lose commands.
 
     **A command is handed out once.** `GET /v1/commands` takes a batch from the
@@ -36,6 +36,14 @@ info:
     `#INTERNAL.APPROVE`. Nothing is checked at announce time: a node that did not
     implement it answers `unknown_method`, and that is an honest refusal.
 
+    **The generation is the identity.** Two counters decide who is talking to
+    whom. `epoch` is the server's own: it changes on every server restart, and a
+    client that names another one is refused instead of being served commands
+    from a life it does not belong to. `client_epoch` is the client's own: it
+    grows on every connection, so an older instance of a node is recognised even
+    after the server restarted. Only `announce` with `epoch: null` — "I lost my
+    state" — closes in-flight commands; a socket that comes and goes never does.
+
 servers:
   - url: https://dsh.example.com/dsh-nodes
     description: prefix configured on the plugin; it can be any path
@@ -49,18 +57,12 @@ tags:
     description: WebSocket used only for cheap wake-ups
 
 
-# Кадры websocket. Список машиночитаемый: тест сверяет его с кодом, чтобы
-# схема не отставала от реализации.
+# WebSocket frames. The list is machine-readable: a test compares it with the code so
+# the schema cannot lag behind the implementation.
 x-ws-frames:
-  - hello
-  - hello-ok
-  - check_state
-  - alive
   - state
   - ping
   - pong
-  - work
-  - error
 
 # Методы, которые объявляют клиентские API. Список сверяется тестом с
 # описаниями в репозитории клиента: так schema догоняет код сразу, а не через
@@ -89,11 +91,33 @@ x-client-methods:
     - approve
     - debug_info
 
-# Соглашения протокола, которые не видны из отдельного маршрута.
-# Подробно — spec/AGENTS.md; здесь коротко и машинночитаемо.
+# Protocol conventions that a single route cannot show.
+# Details — spec/AGENTS.md; here short and machine-readable.
 x-protocol-rules:
-  websocket: state only (hello/check_state/state); ping/pong is the single
-    exception and a failed ping drops the socket
+  websocket: >-
+    state only. The client sends `{t:"state", epoch, client_epoch,
+    max_commandno}` and `{t:"ping", no}`; the server answers `{t:"state", epoch,
+    max_commandno}` and `{t:"pong", no}`. There is no handshake frame:
+    everything a node says about itself travels in announce
+  epoch: >-
+    the server generation is the identity token of a connection. announce with
+    `epoch: null` means the client lost its state and closes that node's
+    in-flight commands as `node_restarted`; announce with a different epoch is
+    409 `epoch-mismatch`; a state frame or a commands request with a different
+    epoch is 4409 (reason `epoch`) on the socket and 409 `epoch-mismatch` over
+    HTTP
+  client-epoch: >-
+    the client's own counter, incremented on every connection — reconnects and
+    restarts alike. Lower than the one already known for the node is 4001
+    (reason `client-epoch`) on the socket and 409 `client-epoch-stale` over HTTP
+  max-commandno-mismatch: >-
+    a claim the client makes in a state frame or a commands request is only
+    logged with both numbers; no reaction is decided yet
+  websocket-close-codes:
+    4001: replaced, or a stale client epoch (reason `client-epoch`)
+    4400: a frame that is not part of the protocol
+    4401: the token was revoked, or the socket went silent
+    4409: epoch mismatch (reason `epoch`)
   control-prefix: "#"
   control-api: -1
   control-namespace: internal
@@ -150,7 +174,6 @@ paths:
                   type: string
                   maxLength: 200
                   description: client secret; without it no token is issued
-                proto: { type: integer }
                 clientVersion: { type: string }
       responses:
         "202":
@@ -217,7 +240,6 @@ paths:
                   maxItems: 8
                   items: { type: string, maxLength: 64 }
                 uuid: { type: string }
-                proto: { type: integer }
                 clientVersion: { type: string }
       responses:
         "200":
@@ -245,6 +267,19 @@ paths:
         schema — bump the version. The version is the **contract** version, not
         the client version; fusing two contracts makes the server use whichever
         schema it saw first.
+
+        This is also where the client states its generation, and it is the only
+        statement that can close in-flight commands:
+
+        | `epoch` | meaning | answer |
+        | --- | --- | --- |
+        | the current one | the client lives in this server generation | 200 |
+        | `null` (or absent) | the client restarted and lost its state | 200, after closing every `processing` command of this node with `node_restarted` |
+        | a different one | the client is talking from another life of the server | `409 epoch-mismatch`, nothing is written |
+        | `client_epoch` lower than known | an older instance of the node is talking | `409 client-epoch-stale`, nothing is written |
+
+        Without the socket this route carries no presence: the socket says "I am
+        waiting", announce says "this is what I am".
       requestBody:
         required: true
         content:
@@ -259,6 +294,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnnounceAccepted"
         "400": { $ref: "#/components/responses/Error" }
+        "409":
+          description: |
+            `epoch-mismatch` — the client named another server generation;
+            `client-epoch-stale` — the client's own generation is older than the
+            one this node is already known by. Nothing is written in either case:
+            the client reconnects and announces `epoch: null`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/state:
     get:
@@ -284,7 +329,14 @@ paths:
         out again — not to this client, not to another one.
 
         With nothing ready the batch is empty and `ready` is zero; the client
-        should then wait for a `check_state` answer instead of polling.
+        should then say "I am waiting" with a `state` frame instead of polling.
+
+        `epoch` and `client_epoch` travel as query parameters and are checked
+        exactly like in `announce`: a different server generation is
+        `409 epoch-mismatch`, an older client generation is
+        `409 client-epoch-stale`, and neither hands out a command. Both are
+        optional: a client that states neither is not checked, which is how an
+        older client keeps working — it just cannot prove where it stands.
 
         `session.chdir` arrives through this same route as an ordinary command of
         the internal `session` API. Control commands use the reserved namespace
@@ -308,6 +360,29 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 1, maximum: 5, default: 5 }
+        - name: epoch
+          in: query
+          required: false
+          description: |
+            The server generation the client lives in. A different one is refused
+            with `409 epoch-mismatch`; the client reconnects and announces
+            `epoch: null`.
+          schema: { type: integer, nullable: true }
+        - name: client_epoch
+          in: query
+          required: false
+          description: |
+            The client's own generation counter, the same one it announced. Lower
+            than the known one is `409 client-epoch-stale`: an older instance of
+            the node is talking.
+          schema: { type: integer, nullable: true }
+        - name: max_commandno
+          in: query
+          required: false
+          description: |
+            The last command number the client knows. A divergence from the
+            server's own number is only logged for now; it changes no behaviour.
+          schema: { type: integer, nullable: true }
       responses:
         "200":
           description: a batch of commands
@@ -316,6 +391,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommandBatch"
         "401": { $ref: "#/components/responses/Error" }
+        "409":
+          description: |
+            `epoch-mismatch` or `client-epoch-stale`; nothing is handed out.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/commands/{seq}/result:
     post:
@@ -355,30 +437,49 @@ paths:
         HTTP. The token goes in the `Sec-WebSocket-Protocol` header, never in the
         URL — a URL ends up in proxy logs and browser history.
 
-        Client to server:
-         - `{t:"hello", epoch, known, access, workdir, allowEscalation, approver, uptimeSeconds, boot}` —
-           the first frame; `epoch` from a previous connection lets the server
-           answer `reconnect: true`;
-         - `{t:"check_state", known}` — "I am alive, and I know commands up to
-           `known`". The server answers with `{t:"state", max_commandno:N}` **at once** if
-           `N > known`, otherwise it stays silent and marks the node as waiting,
-           so the answer arrives later, pushed by a new command. This is the
-           whole polling replacement: an idle node and an idle server exchange
-           nothing but this one number. `known: null` means the client lost
-           its state, i.e. it restarted: the server answers at once and closes
-           every command it had handed to that node with `node_restarted`, so
-           the model learns the result is gone instead of waiting for a timeout.
-           The old frame name `alive` is still accepted;
-         - `{t:"pong"}`.
+        Two frames in, two frames out. There is no handshake: the client first
+        announces over HTTP (that is where its generation is settled) and then
+        says `state` when it starts waiting.
 
-        Server to client:
-         - `{t:"hello-ok", epoch, max_commandno, reconnect}`;
-         - `{t:"state", max_commandno}` — "my number is higher than yours, go
-           fetch"; the number is adopted by the client, holes included;
-         - `{t:"ping"}`.
+        Client to server — exactly two frames:
 
-        Without the socket a client still works, it just learns about work on the
-        next poll.
+         - `{t:"state", epoch, client_epoch, max_commandno}` — "I am alive and I am
+           waiting, I live in generation `epoch`, my own generation is
+           `client_epoch`, and I know commands up to `max_commandno`". This one
+           frame is both presence and the wait flag: the server pushes
+           `{t:"state", ...}` at once when its number is already higher, otherwise
+           it stays silent and remembers the wait, so the answer arrives with the
+           next command. An idle node and an idle server exchange nothing but this
+           one number.
+         - `{t:"ping", no}` — keepalive; the server echoes the same `no`.
+
+        Server to client — exactly two frames:
+
+         - `{t:"state", epoch, max_commandno}` — "my number is higher than yours,
+           go fetch"; the client adopts the number the server names, holes
+           included. It is sent only to a node that declared it is waiting;
+         - `{t:"pong", no}`.
+
+        `max_commandno` in a `state` frame is a claim, not an identity: a
+        divergence from the server's own number is logged with both numbers and
+        changes nothing else.
+
+        The generations are checks, and a failed check closes the socket — the
+        client reconnects from scratch with `epoch: null`, which is the only
+        statement that closes in-flight commands:
+
+        | frame | condition | close code | reason |
+        | --- | --- | --- | --- |
+        | `state` | `epoch` is missing or is not the current one | `4409` | `epoch` |
+        | `state` | `client_epoch` lower than the one known for the node | `4001` | `client-epoch` |
+        | any | the frame is not part of the protocol | `4400` | `unknown-frame` / `bad-json` / `no-t` |
+
+        Other closes: `4001 replaced` when a newer socket takes the place of an
+        older one, `4401` when the token is revoked, `4401 silent` when the
+        keepalive misses too many times.
+
+        Without the socket a client still works: it keeps fetching commands over
+        HTTP and just does not learn about new work instantly.
       responses:
         "101":
           description: switched to the WebSocket protocol
@@ -650,7 +751,25 @@ components:
                       in the `now` field of the result envelope. A canonical name
                       left out (or set to null) is not placed anywhere: measuring
                       into nowhere is allowed, inventing a field name is not.
-        proto: { type: integer }
+        epoch:
+          type: integer
+          nullable: true
+          description: |
+            The server generation the client lives in, taken from a previous
+            answer. `null` is a statement, not a missing value: the client
+            restarted and lost its state, so every command this node is still
+            supposed to be executing is closed as `node_restarted`. A different
+            generation is refused with `409 epoch-mismatch` and nothing is
+            written.
+        client_epoch:
+          type: integer
+          nullable: true
+          description: |
+            The client's own generation: a persistent counter, incremented on
+            every connection — reconnects and restarts alike. It is stored per
+            node and survives a server restart, so a stale instance of the node
+            can be recognised by a lower number (`409 client-epoch-stale`) even
+            after the server itself restarted.
         clientVersion: { type: string }
         access:
           type: string
@@ -695,9 +814,11 @@ components:
         epoch:
           type: integer
           description: |
-            Server generation: it changes on every server restart. A client that
-            reconnects with a stale epoch learns that its previous state belongs
-            to another life of the server.
+            Server generation: it changes on every server restart, and it is the
+            identity token of a connection. A client that names a stale one is
+            refused (`409 epoch-mismatch` over HTTP, close code `4409` on the
+            socket) and starts over by announcing `epoch: null`; a client that
+            names the current one is simply in the same life of the server.
         max_commandno:
           type: integer
           description: |
@@ -837,7 +958,7 @@ components:
             notification.
         epoch:
           type: integer
-          description: server generation, so a stale client notices it reconnected
+          description: server generation; a client that does not recognise it has to announce again
 
     Command:
       type: object

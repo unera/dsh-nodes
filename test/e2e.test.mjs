@@ -204,7 +204,7 @@ t('an enrollment request: pending → approve → the token comes once', async (
   const first = await fetch(`${base}/v1/enroll`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ uuid, name: 'lamp', proto: 1 }),
+    body: JSON.stringify({ uuid, name: 'lamp', clientVersion: 'lamp-1' }),
   })
   assert.equal(first.status, 202)
   assert.equal((await first.json()).status, 'pending')
@@ -260,7 +260,7 @@ t('pairing: the admin issues a link, the client exchanges the code for a token, 
   const paired = await fetch(`${base}/v1/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: created.body.code, uuid: 'pair-uuid-1', name: 'pair-node', proto: 1 }),
+    body: JSON.stringify({ code: created.body.code, uuid: 'pair-uuid-1', name: 'pair-node', clientVersion: 'pair-1' }),
   })
   assert.equal(paired.status, 200)
   const body = await paired.json()
@@ -319,7 +319,7 @@ t('admin API: the approve and reject requests through functions', async () => {
   await fetch(`${base}/v1/enroll`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ uuid, name: 'sensor', proto: 1 }),
+    body: JSON.stringify({ uuid, name: 'sensor', clientVersion: 'sensor-1' }),
   })
   const pending = await admin('/pending')
   assert.ok(pending.body.pending.some((row) => row.uuid === uuid))
@@ -385,7 +385,7 @@ t('only the one who knows the nonce gets the token for a request', async () => {
   await fetch(`${base}/v1/enroll`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ uuid, name: 'nonce-node', proto: 1, nonce }),
+    body: JSON.stringify({ uuid, name: 'nonce-node', clientVersion: 'nonce-1', nonce }),
   })
   const approved = await admin(`/pending/${uuid}/approve`, { method: 'POST', body: '{}' })
   assert.equal(approved.status, 200)
