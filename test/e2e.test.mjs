@@ -594,7 +594,7 @@ t('взятая команда без ответа закрывается как
   assert.match(outcome.message, /не ответил/)
 })
 
-t('отказ без песочницы-вопроса: сервер ставит session.approve и ждёт ответа узла', async () => {
+t('отказ без песочницы-вопроса: сервер ставит #INTERNAL.APPROVE и ждёт ответа узла', async () => {
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'local-approve' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
@@ -604,7 +604,7 @@ t('отказ без песочницы-вопроса: сервер стави�
     { name: 'session', version: '3', methods: [{ method: 'approve', args: { type: 'object' } }] },
   ])
   const bashApi = announced.apis[0]
-  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access' })
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access', approver: 'local' })
 
   const tools = createTools({
     store,
@@ -631,10 +631,11 @@ t('отказ без песочницы-вопроса: сервер стави�
   assert.equal(outcome.code, 'sandbox_denied')
   assert.match(outcome.message, /ждёт подтверждения/)
 
-  // сервер должен был поставить команду session.approve
+  // сервер должен был поставить служебную команду вопроса
   const approve = queue.take(nodeId, { limit: 5 })
   assert.equal(approve.commands.length, 1, 'апрув должен уйти на узел')
-  assert.equal(approve.commands[0].method, 'approve')
+  assert.equal(approve.commands[0].method, '#INTERNAL.APPROVE', 'вопрос идёт служебной командой, а не методом API')
+  assert.equal(approve.commands[0].api, -1)
   const payload = JSON.parse(approve.commands[0].args.text ? '{}' : '{}')
   void payload
 
@@ -694,7 +695,8 @@ t('исход повтора после подтверждения тоже по
     { name: 'session', version: 'audit-4', methods: [{ method: 'approve', args: { type: 'object' } }] },
   ])
   const bashApi = announced.apis[0]
-  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access' })
+  // вопрос идёт служебной командой, поэтому узел объявляет только обещание
+  store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access', approver: 'local' })
   const before = store.readAudit(50).length
 
   const tools = createTools({ store, queue, config: { ...CONFIG }, epoch: queue.epoch, sandboxFor: () => ({ mode: 'workspace-write' }) })
@@ -730,8 +732,8 @@ t('исход повтора после подтверждения тоже по
   assert.ok(store.readAudit(50).length > before)
 })
 
-t('approver=local без session.approve не принимается: узел честно становится none', async () => {
-  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'liar-node' }) })
+t('approver=local принимается без объявлений: вопрос идёт служебной командой', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'promise-node' }) })
   const nodeId = created.body.node.id
   await fetch(`${base}/v1/announce`, {
     method: 'PUT',
@@ -743,26 +745,8 @@ t('approver=local без session.approve не принимается: узел �
     }),
   })
   const node = store.node(nodeId)
-  assert.equal(node.approver, 'none', 'обещание без метода не принимаем')
-  assert.equal(node.allow_escalation, 0)
-})
-
-t('approver=local с session.approve принимается', async () => {
-  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'honest-node' }) })
-  const nodeId = created.body.node.id
-  await fetch(`${base}/v1/announce`, {
-    method: 'PUT',
-    headers: { authorization: `Bearer ${created.body.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      apis: [
-        { name: 'bash', version: '1', methods: [{ method: 'exec', args: { type: 'object' } }] },
-        { name: 'session', version: '3', methods: [{ method: 'approve', args: { type: 'object' } }] },
-      ],
-      approver: 'local',
-      allowEscalation: true,
-    }),
-  })
-  assert.equal(store.node(nodeId).approver, 'local')
+  assert.equal(node.approver, 'local', 'обещание узла принимаем как есть')
+  // не реализовал команду — ответит unknown_method, и это честный отказ на месте
 })
 
 t('человек отказал в DSH-апруве — команда не выполняется', async () => {
@@ -873,12 +857,20 @@ t('просроченная невыданная команда получает
   assert.equal(queue.take(777, { limit: 5 }).commands.length, 0)
 })
 
-t('команда апрува не стареет: человек может думать дольше commandTtl', () => {
+t('апрув не бессмертен: исключения для него убраны', () => {
+  // невыданный вопрос стареет как любая команда: узел, до которого не дошли,
+  // держать его вечно не должен
   const queue = new Queue({ epoch: 1, defaultTimeout: 86400, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
-  queue.enqueue({ nodeId: 778, api: 1, method: 'approve', args: { id: 'x', text: 't' }, timeout: 86400 })
+  queue.enqueue({ nodeId: 778, api: -1, method: '#INTERNAL.APPROVE', args: { id: 'x', text: 't' }, timeout: 86400, priority: 5 })
   queue.sweep(Date.now() + 10 * 60 * 1000)
-  const got = queue.take(778, { limit: 5 })
-  assert.equal(got.commands.length, 1, 'вопрос человеку должен дождаться ответа')
+  assert.equal(queue.take(778, { limit: 5 }).commands.length, 0, 'невыданный вопрос протухает по общему сроку')
+
+  // а выданный живёт своим таймаутом: человек может думать долго
+  const second = new Queue({ epoch: 1, defaultTimeout: 86400, maxBatch: 5, maxQueue: 50, commandTtl: 1 })
+  second.enqueue({ nodeId: 779, api: -1, method: '#INTERNAL.APPROVE', args: { id: 'y', text: 't' }, timeout: 86400, priority: 5 })
+  assert.equal(second.take(779, { limit: 5 }).commands.length, 1)
+  second.sweep(Date.now() + 10 * 60 * 1000)
+  assert.equal(second.info(779).queued, 1, 'выданный вопрос ждёт ответа человека')
 })
 
 t('maxQueue считает только невыданное: взятая команда не занимает слот', () => {
