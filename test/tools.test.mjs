@@ -168,3 +168,53 @@ test('клиент не может объявить служебный мето�
   assert.ok(names.includes('exec'), 'обычные методы остаются')
   assert.match(answer.warnings.join(' '), /зарезервированы/)
 })
+
+test('правило flushAround доезжает до очереди барьерами', async () => {
+  const { node } = store.createNode({ name: 'flush-node', access: 'danger-full-access' })
+  // `special` объявляет узел, а барьеры ставит сервер: клиент о FLUSH не думает
+  store.announce(node.id, [{
+    name: 'session',
+    version: '9',
+    methods: [
+      { method: 'chdir', args: { type: 'object' }, special: 'flushAround' },
+      { method: 'cwd', args: { type: 'object' } },
+    ],
+  }])
+  const api = { id: store.nodeApis(node.id)[0] }
+
+  const sent = []
+  const spyQueue = {
+    epoch: queue.epoch,
+    enqueue (command) {
+      sent.push(command)
+      return { seq: sent.length, promise: Promise.resolve({ status: 'ok', code: 0, results: [] }) }
+    },
+    cancel () {},
+  }
+  const localTools = createTools({
+    store, queue: spyQueue, config: { aliveTimeoutSeconds: 60 }, epoch: queue.epoch,
+    sandboxFor: () => ({ mode: 'rw' }),
+  })
+  const call = localTools.find((tool) => tool.name === 'nodes_call')
+  await call.execute({ node: node.id, api: api.id, method: 'chdir', data: { path: '/tmp' } }, {})
+  await call.execute({ node: node.id, api: api.id, method: 'cwd', data: {} }, {})
+
+  const chdir = sent.find((command) => command.method === 'chdir')
+  assert.equal(chdir.flushBefore, true, 'chdir обязан дождаться пула до себя')
+  assert.equal(chdir.flushAfter, true, 'и не пускать за собой ничего, пока не применится')
+  const cwd = sent.find((command) => command.method === 'cwd')
+  assert.equal(cwd.flushBefore, false, 'метод без правила барьеров не просит')
+  assert.equal(cwd.flushAfter, false)
+})
+
+test('правило метода читается из сохранённого объявления', async () => {
+  const { ruleFor, flushPhases } = await import('../lib/special-rules.mjs')
+  const def = { methods: [{ method: 'exec' }, { method: 'chdir', special: 'flushAfter' }] }
+  assert.equal(ruleFor(def, 'exec'), null)
+  assert.equal(ruleFor(def, 'chdir'), 'flushAfter')
+  assert.equal(ruleFor(def, 'nope'), null)
+  assert.deepEqual(flushPhases('flushAfter'), { before: false, after: true })
+  assert.deepEqual(flushPhases('flushAround'), { before: true, after: true })
+  assert.equal(flushPhases('timing'), null, 'замер — не барьер')
+  assert.equal(flushPhases(null), null)
+})

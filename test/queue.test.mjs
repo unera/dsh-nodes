@@ -23,3 +23,77 @@ test('ждущую команду отменять не нужно: узел е�
   const matches = source.match(/command\.status === 'processing'/g) ?? []
   assert.ok(matches.length >= 2, 'обе точки закрытия должны проверять, что команда в работе')
 })
+
+test('flushAround: барьер до, барьер после, команда — между ними', () => {
+  const queue = new Queue({ epoch: 1 })
+  const { seq } = queue.enqueue({
+    nodeId: 1, api: 7, method: 'chdir', args: {}, flushBefore: true, flushAfter: true,
+  })
+
+  const first = queue.take(1, { limit: 5 }).commands
+  assert.equal(first.length, 1, 'барьер не должен уезжать в пачке с другими командами')
+  assert.equal(first[0].method, '#INTERNAL.FLUSH')
+  assert.equal(first[0].api, -1, 'барьер — служебная команда под псевдо-API')
+  assert.equal(first[0].seq, seq - 1, 'номер барьера идёт раньше номера команды')
+
+  assert.deepEqual(queue.take(1).commands, [], 'пока барьер висит, за ним ничего не выдаётся')
+
+  queue.close(1, first[0].seq, { ok: true })
+  const middle = queue.take(1).commands
+  assert.equal(middle.length, 1)
+  assert.equal(middle[0].method, 'chdir')
+  assert.equal(middle[0].seq, seq, 'команда получила свой номер после барьера')
+
+  // второй барьер выдаётся сам (он же должен доехать до узла), но за ним уже
+  // ничего нет — и всё, что встало бы после него, ждало бы его ответа
+  queue.close(1, seq, { ok: true })
+  const last = queue.take(1, { limit: 5 }).commands
+  assert.equal(last.length, 1, 'второй барьер уходит один')
+  assert.equal(last[0].method, '#INTERNAL.FLUSH')
+  assert.equal(last[0].seq, seq + 1)
+})
+
+test('flushBefore и flushAfter ставят по одному барьеру', () => {
+  const queue = new Queue({ epoch: 1 })
+  const before = queue.enqueue({ nodeId: 1, api: 7, method: 'a', args: {}, flushBefore: true })
+  const after = queue.enqueue({ nodeId: 1, api: 7, method: 'b', args: {}, flushAfter: true })
+
+  const beforeBarrier = queue.issued(1, before.seq - 1)
+  assert.equal(beforeBarrier.method, '#INTERNAL.FLUSH', 'перед командой — барьер')
+  assert.equal(beforeBarrier.seq, 1)
+  assert.equal(before.seq, 2)
+
+  const afterBarrier = queue.issued(1, after.seq + 1)
+  assert.equal(afterBarrier.method, '#INTERNAL.FLUSH', 'за командой — барьер')
+  assert.equal(after.seq, 3, 'номер команды между барьерами')
+  assert.equal(afterBarrier.seq, 4)
+})
+
+test('без правила барьеров нет', () => {
+  const queue = new Queue({ epoch: 1 })
+  const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
+  assert.equal(seq, 1, 'первая команда узла получает первый номер')
+  assert.deepEqual(queue.take(1, { limit: 5 }).commands.map((command) => command.method), ['exec'])
+})
+
+test('барьер живёт меньше служебных суток: он держит очередь', () => {
+  const queue = new Queue({ epoch: 1, barrierTimeout: 90 })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'chdir', args: {}, flushBefore: true })
+  const [barrier] = queue.take(1).commands
+  assert.equal(barrier.timeout, 90, 'срок барьера — свой, а не суточный, как у CANCEL')
+})
+
+test('потерянный барьер не держит очередь вечно и попадает в журнал', () => {
+  const queue = new Queue({ epoch: 1, barrierTimeout: 1 })
+  const log = []
+  queue.setControlLog((nodeId, method, args, outcome) => log.push({ nodeId, method, outcome }))
+  queue.enqueue({ nodeId: 1, api: 7, method: 'chdir', args: {}, flushBefore: true })
+  const [barrier] = queue.take(1).commands
+  const removed = queue.sweep(Date.now() + 10 * 60 * 1000)
+  assert.ok(removed >= 1, 'барьер должен сниматься уборкой')
+  assert.equal(log.length, 1)
+  assert.equal(log[0].method, '#INTERNAL.FLUSH')
+  assert.equal(log[0].outcome.code, 'lost')
+  assert.equal(queue.info(1).queued, 0)
+  void barrier
+})
