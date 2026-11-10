@@ -62,6 +62,15 @@ cancellation reaches the node while there is still something to cancel.
 `session.approve` is the one exception: it leaves the pool entirely, because a
 dialog with a human may hang for a day.
 
+## The socket carries state, not events
+
+`state` is a number, not a notification: the server sends it when it sees
+`state > known`, and asking again is always safe. That removes the whole class of
+"the event was lost" problems — but only if the client is ready to hear the
+answer *before* it asks. Subscribe to the frame first, then send `check_state`;
+otherwise the reply can arrive in the gap, find nobody to wake, and the node
+sleeps with work waiting in the queue. Nothing will ask a second time.
+
 ## Control commands travel through the queue
 
 A control command is an ordinary queued command with:
