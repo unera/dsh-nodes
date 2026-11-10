@@ -7,10 +7,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { parse as parseYaml } from 'yaml'
 
 const root = new URL('..', import.meta.url).pathname
 const read = (path) => readFileSync(join(root, path), 'utf8')
 const spec = read('spec/openapi.yaml')
+// разобранная схема: проверять структуру, а не искать подстроки
+const schema = parseYaml(spec)
+const components = schema.components?.schemas ?? {}
 
 /** Маршруты, которые сервер действительно обрабатывает. */
 function serverRoutes () {
@@ -32,22 +36,19 @@ function wsFrames () {
 }
 
 /** Методы клиентских API: то, что узел объявляет при announce. */
-function clientMethods () {
-  // описания клиентских API живут в репозитории клиента; в CI его может не
-  // быть, поэтому отсутствие файлов — не ошибка, а повод пропустить проверку
-  const sources = ['../dsh-node-client/lib/plugins/files.mjs', '../dsh-node-client/lib/plugins/session.mjs']
-  const source = sources
-    .map((path) => {
-      try {
-        return readFileSync(join(root, path), 'utf8')
-      } catch {
-        return ''
-      }
-    })
-    .join('\n')
-  if (!source) return null
+async function clientMethods () {
+  // объявления живут в репозитории клиента; в CI его может не быть, поэтому
+  // отсутствие файлов — повод пропустить проверку, а не упасть
+  const modules = ['../dsh-node-client/lib/plugins/files.mjs', '../dsh-node-client/lib/plugins/session.mjs']
   const names = new Set()
-  for (const match of source.matchAll(/method: '([a-zA-Z_]+)'/g)) names.add(match[1])
+  for (const path of modules) {
+    try {
+      const module = await import(new URL(path, import.meta.url).href)
+      for (const method of module.api().methods) names.add(method.method)
+    } catch {
+      return null
+    }
+  }
   return names
 }
 
@@ -66,13 +67,25 @@ test('каждый кадр websocket описан в схеме', () => {
   assert.deepEqual(missing, [], `кадры не описаны в x-ws-frames: ${missing.join(', ')}`)
 })
 
-test('каждый метод клиентских API упомянут в схеме', (t) => {
-  const methods = clientMethods()
+test('каждый метод клиентских API упомянут в схеме', async (t) => {
+  const methods = await clientMethods()
   if (!methods) {
     t.skip('клиентский репозиторий не найден рядом')
     return
   }
-  const missing = [...methods].filter((name) => !spec.includes(name))
+  // ищем там, где методам положено быть: в описаниях маршрутов и моделей
+  const described = new Set()
+  const walk = (node) => {
+    if (Array.isArray(node)) return node.forEach(walk)
+    if (node && typeof node === 'object') {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'method' && typeof value === 'string') described.add(value)
+        walk(value)
+      }
+    }
+  }
+  walk(schema)
+  const missing = [...methods].filter((name) => !described.has(name))
   assert.deepEqual(missing, [], `методы не описаны: ${missing.join(', ')}`)
 })
 
@@ -95,7 +108,8 @@ test('applyRules проверяет привязку и отказывает о�
 
   const ok = parseApplyRules([{ api: 'session', method: 'chdir', rule: 'flushAround' }], { resolve })
   assert.deepEqual(ok.errors, [])
-  assert.deepEqual(ok.bindings, [{ apiId: 7, method: 'chdir', rule: 'flushAround', opts: null }])
+  // привязка ссылается на имя: номер API выдаёт транзакция объявления
+  assert.deepEqual(ok.bindings, [{ api: 'session', version: null, method: 'chdir', rule: 'flushAround', opts: null }])
   assert.deepEqual(ok.warnings, [])
 
   // всё, что не сходится, — отказ, а не тихий пропуск

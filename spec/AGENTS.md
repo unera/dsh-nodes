@@ -63,8 +63,10 @@ configurable), never take more than the free slots in one batch, and go back for
 more as soon as a slot frees — without waiting for the rest of the batch. Then a
 cancellation reaches the node while there is still something to cancel.
 
-`session.approve` is the one exception: it leaves the pool entirely, because a
-dialog with a human may hang for a day.
+Control commands (`#…`) are no exception either: they take a pool slot like any
+other command and differ only in priority — `#INTERNAL.CANCEL` at 10,
+`#INTERNAL.APPROVE` at 5, user work at 0. The barrier `#INTERNAL.FLUSH` inherits
+the priority of the command it was placed for.
 
 ## The socket carries state, not events
 

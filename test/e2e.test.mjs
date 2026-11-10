@@ -1154,3 +1154,30 @@ t('одна и та же пара (name, version) с разными метода
   }])
   assert.equal(versioned.status, 200)
 })
+
+t('отказ на правилах не оставляет объявление полузаписанным', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'atomic-node' }) })
+  const token = created.body.token
+  const nodeId = created.body.node.id
+
+  const good = [{ name: 'bash', version: 'atomic-1', methods: [{ method: 'exec', args: { type: 'object' } }] }]
+  assert.equal((await api.announce(base, token, good)).status, 200)
+  const before = store.nodeApis(nodeId)
+  assert.equal(before.length, 1)
+
+  // новое объявление с опечаткой в правилах: api другой, правило на метод,
+  // которого нет
+  const bad = await announceExpectingError(token, [
+    { name: 'shell', version: 'atomic-1', methods: [{ method: 'exec', args: { type: 'object' } }] },
+  ], { applyRules: [{ api: 'shell', method: 'no-such', rule: 'timing' }] })
+  assert.equal(bad.status, 400)
+  assert.equal(bad.body.code, 'apply-rules-invalid')
+
+  // объявление откатилось целиком: apis узла прежние, новых записей нет
+  assert.deepEqual(store.nodeApis(nodeId), before, 'apis не должны измениться при отказе')
+  assert.equal(
+    store.catalog().some((entry) => entry.name === 'shell' && entry.version === 'atomic-1'),
+    false,
+    'отказанный api не должен появиться в справочнике',
+  )
+})

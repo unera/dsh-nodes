@@ -25,13 +25,16 @@ info:
     command leaves it `processing`; the server closes it as `lost` after the
     timeout so the model gets an answer instead of silence.
 
-    **Approval is an ordinary command.** When the sandbox denies a command, the
-    server queues `session.approve` on the node with a long timeout and returns
-    the denial to the model at once — nothing waits.
+    **Approval is a control command.** When the sandbox denies a command, the
+    server queues `#INTERNAL.APPROVE` on the node — an internal command, not a
+    method of any announced API — and returns the denial to the model at once;
+    nothing waits for the human. The question lives as long as
+    `approvalTtlSeconds` (a day by default) and can be cancelled at any time with
+    `#INTERNAL.CANCEL`.
 
     **`approver: "local"` is a promise.** A node announcing it must implement
-    `session.approve`. The server checks the announcement and falls back to
-    `approver: "none"` if the method is missing.
+    `#INTERNAL.APPROVE`. Nothing is checked at announce time: a node that did not
+    implement it answers `unknown_method`, and that is an honest refusal.
 
 servers:
   - url: https://dsh.example.com/dsh-nodes
@@ -95,15 +98,19 @@ x-protocol-rules:
   control-api: -1
   control-namespace: internal
   control-example: '#INTERNAL.CANCEL'
+  control-commands: ['#INTERNAL.CANCEL', '#INTERNAL.FLUSH', '#INTERNAL.APPROVE']
+  control-approve-ttl: approvalTtlSeconds in the plugin config, a day by default
   control-ttl-seconds: 86400
   control-tolerates: [late delivery, duplicates, missing target]
   control-priority: control commands outrank user work (cancellation must not
-    queue behind the command it cancels); `#INTERNAL.FLUSH` inherits the priority
-    of the command it was placed for, so it holds user work and lets control
-    commands through
-  control-flush: '#INTERNAL.FLUSH' is the barrier of the special rules: it is
-    taken alone, nothing behind it is handed out while it is pending, and it
-    reports ok whether it had something to wait for or not
+    queue behind the command it cancels). `#INTERNAL.CANCEL` runs at 10,
+    `#INTERNAL.APPROVE` at 5, user work at 0; `#INTERNAL.FLUSH` inherits the
+    priority of the command it was placed for, so it holds user work and lets
+    control commands through
+  control-flush: >-
+    '#INTERNAL.FLUSH' is the barrier of the special rules. It is taken alone,
+    nothing behind it is handed out while it is pending, and it reports ok
+    whether it had something to wait for or not
   rule-bindings: a node binds its methods to server-side rules in a separate
     `applyRules` list, never inside the api def; the rule set is fixed and lives
     in spec/SPECIAL-RULES.md
@@ -279,9 +286,11 @@ paths:
         With nothing ready the batch is empty and `ready` is zero; the client
         should then wait for a `check_state` answer instead of polling.
 
-        `session.chdir` and `session.approve` arrive through this same route:
-        they are ordinary commands carrying methods of the internal `session`
-        API.
+        `session.chdir` arrives through this same route as an ordinary command of
+        the internal `session` API. Control commands use the reserved namespace
+        (`api = -1`, name starts with `#`): `#INTERNAL.CANCEL` outranks user work,
+        `#INTERNAL.FLUSH` is a barrier, `#INTERNAL.APPROVE` (priority 5) asks the
+        human.
 
         Run independent commands of a batch in parallel if you like, but keep a
         cap (the reference client uses 5): one model turn can produce a dozen
@@ -291,11 +300,9 @@ paths:
         command too, and it sits in the queue behind the command it cancels: a
         client that blocks on its batch never sees `#INTERNAL.CANCEL` issued
         during a long command. Take no more than the free slots in one request
-        and come back for more as soon as a slot frees. `session.chdir` must be applied
-        first and in order — it changes the session working directory, so the
-        rest of the batch has to start in the new one. `session.approve` should
-        run outside the pool: a dialog may hang for a day and must not hold a
-        slot.
+        and come back for more as soon as a slot frees. The batch has no special
+        cases: `session.chdir` is ordered by its own `flushAround` rule, and every
+        command — control commands included — takes a pool slot.
       parameters:
         - name: limit
           in: query
@@ -657,9 +664,10 @@ components:
           enum: [local, server, none]
           description: |
             Who may answer a question about a wider mode. `local` — the human at
-            this machine, and a promise to implement `session.approve`: without
-            that method the server refuses the promise and treats the node as
-            `none`. `server` — the human in the DSH dialog. `none` — never ask.
+            this machine, and a promise to implement `#INTERNAL.APPROVE`; the
+            server takes the promise as given, and a node without the command
+            answers `unknown_method`. `server` — the human in the DSH dialog.
+            `none` — never ask.
         base:
           type: string
           enum: [ro, rw, full]
