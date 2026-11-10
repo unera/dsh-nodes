@@ -79,6 +79,9 @@ sleeps with work waiting in the queue. Nothing will ask a second time.
 
 A control command is an ordinary queued command with:
 
+- a **priority above user work** (`#INTERNAL.CANCEL` is taken before anything
+  queued before it, and is exempt from the queue ceiling): a cancellation that
+  queues behind the command it cancels is useless;
 - `api = -1` (`CONTROL_API`) — no node declares this API;
 - a `#`-prefixed method name (`#INTERNAL.CANCEL` for cancellation);
 - a very long TTL (a day) and **no waiting process**: nobody awaits the result,

@@ -137,3 +137,61 @@ test('управляющая команда будит узел, а не ждё�
   queue.control(1, '#INTERNAL.CANCEL', { seq: 7, reason: 'timeout' })
   assert.deepEqual(woken, [1], 'без побудки отмена лежит в очереди до случайного просыпания')
 })
+
+test('отмена обгоняет пользовательскую работу в очереди', () => {
+  const queue = new Queue({ epoch: 1 })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 1 } })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 2 } })
+  const cancelSeq = queue.control(1, '#INTERNAL.CANCEL', { seq: 1, reason: 'timeout' })
+
+  const batch = queue.take(1, { limit: 5 }).commands
+  assert.equal(batch[0].seq, cancelSeq, 'управляющая команда идёт первой')
+  assert.equal(batch[0].method, '#INTERNAL.CANCEL')
+  assert.deepEqual(batch.slice(1).map((command) => command.args.n), [1, 2], 'остальное — в порядке постановки')
+})
+
+test('отмена проходит сквозь барьер, а обычная работа за ним стоит', () => {
+  const queue = new Queue({ epoch: 1 })
+  // барьер перед командой «b» (flushBefore), затем ещё одна обычная команда
+  queue.enqueue({ nodeId: 1, api: 7, method: 'a', args: {} })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'b', args: {}, flushBefore: true })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'c', args: {} })
+
+  const cancelSeq = queue.control(1, '#INTERNAL.CANCEL', { seq: 1, reason: 'abort' })
+  const batch = queue.take(1, { limit: 5 }).commands
+  assert.equal(batch[0].seq, cancelSeq, 'приоритетная команда обгоняет всё')
+  assert.deepEqual(batch.slice(1).map((command) => command.method), ['a'], 'до барьера обычная работа идёт')
+
+  // барьер выдан отдельно, за ним ничего
+  queue.close(1, batch[0].seq, { ok: true })
+  queue.close(1, batch[1].seq, { ok: true })
+  const barrier = queue.take(1, { limit: 5 }).commands
+  assert.equal(barrier.length, 1)
+  assert.equal(barrier[0].method, '#INTERNAL.FLUSH')
+})
+
+test('потолок очереди не распространяется на управляющие команды, а обычным говорит по-человечески', async () => {
+  const queue = new Queue({ epoch: 1, maxQueue: 2 })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 1 } })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 2 } })
+  const overflow = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 3 } })
+  assert.equal(overflow.seq, null, 'третья не влезает')
+  const outcome = await overflow.promise
+  assert.equal(outcome.code, 'queue_full')
+  assert.match(outcome.message, /перегружен/, 'модели надо объяснить, что случилось')
+  assert.match(outcome.message, /сбавь темп/)
+
+  // отмена в забитую очередь всё равно проходит
+  const cancelSeq = queue.control(1, '#INTERNAL.CANCEL', { seq: 1, reason: 'abort' })
+  assert.ok(cancelSeq, 'управляющая команда не подчиняется потолку')
+})
+
+test('take и info называют номер max_commandno', () => {
+  const queue = new Queue({ epoch: 1 })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
+  queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
+  assert.equal(queue.info(1).max_commandno, 2)
+  const taken = queue.take(1, { limit: 1 })
+  assert.equal(taken.max_commandno, 2, 'номер выдаётся вместе с пачкой: клиенту не надо ничего считать')
+  assert.equal(taken.commands.length, 1)
+})

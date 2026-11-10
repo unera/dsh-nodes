@@ -90,8 +90,13 @@ and nothing may start while it is applied.
 
 - lives in the reserved namespace (`api = -1`, name starts with `#`);
 - is never declared by a node — the server strips reserved names and warns;
-- executes only when the worker pool is empty, and holds the "take more work"
-  side of the loop while it is pending;
+- is taken **alone**, and nothing queued behind it is handed out while it is
+  pending (a client must see the barrier as the only command in its batch);
+- inherits the priority of the command it was placed for — so it holds user work
+  and lets control commands through;
+- is executed from the ordinary stream: it occupies a worker slot like any other
+  command, and "wait for everything before me" means *everything except itself* —
+  waiting for a pool that includes the barrier never ends;
 - reports `ok: true` when it had something to wait for and when it had nothing:
   "there was nothing running" is a success, not an error.
 

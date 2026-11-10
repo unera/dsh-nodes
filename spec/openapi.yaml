@@ -97,6 +97,13 @@ x-protocol-rules:
   control-example: '#INTERNAL.CANCEL'
   control-ttl-seconds: 86400
   control-tolerates: [late delivery, duplicates, missing target]
+  control-priority: control commands outrank user work (cancellation must not
+    queue behind the command it cancels); `#INTERNAL.FLUSH` inherits the priority
+    of the command it was placed for, so it holds user work and lets control
+    commands through
+  control-flush: '#INTERNAL.FLUSH' is the barrier of the special rules: it is
+    taken alone, nothing behind it is handed out while it is pending, and it
+    reports ok whether it had something to wait for or not
   rule-bindings: a node binds its methods to server-side rules in a separate
     `applyRules` list, never inside the api def; the rule set is fixed and lives
     in spec/SPECIAL-RULES.md
@@ -346,7 +353,7 @@ paths:
            the first frame; `epoch` from a previous connection lets the server
            answer `reconnect: true`;
          - `{t:"check_state", known}` — "I am alive, and I know commands up to
-           `known`". The server answers with `{t:"state", state:N}` **at once** if
+           `known`". The server answers with `{t:"state", max_commandno:N}` **at once** if
            `N > known`, otherwise it stays silent and marks the node as waiting,
            so the answer arrives later, pushed by a new command. This is the
            whole polling replacement: an idle node and an idle server exchange
@@ -358,8 +365,9 @@ paths:
          - `{t:"pong"}`.
 
         Server to client:
-         - `{t:"hello-ok", epoch, state, reconnect}`;
-         - `{t:"state"}` — "there are commands, go fetch them";
+         - `{t:"hello-ok", epoch, max_commandno, reconnect}`;
+         - `{t:"state", max_commandno}` — "my number is higher than yours, go
+           fetch"; the number is adopted by the client, holes included;
          - `{t:"ping"}`.
 
         Without the socket a client still works, it just learns about work on the
@@ -682,13 +690,21 @@ components:
             Server generation: it changes on every server restart. A client that
             reconnects with a stale epoch learns that its previous state belongs
             to another life of the server.
-        state:
+        max_commandno:
           type: integer
           description: |
-            Number of the last command ever queued for this node. The client
-            compares it with what it already knows (`check_state`) to find out
-            whether it is behind. It is not a delivery watermark: a command
-            counted here may already be executing.
+            Last command number handed out to this node since the server started.
+            Numbers are honest: they grow by one per queued command, are never
+            reused, and a number spent on a command the node never saw (a
+            cancellation, an expired entry) stays spent.
+
+            So "I know up to N" means "anything new will be ≥ N+1", and the
+            client should adopt the number the server names instead of computing
+            a maximum over the commands it happened to receive: a hole in the
+            numbering can never be caught up by that maximum.
+
+            It is not a delivery watermark — a command counted here may already
+            be executing.
         queued:
           type: integer
           description: commands held in the queue for this node, including the ones being executed
@@ -851,9 +867,9 @@ components:
           type: number
           description: |
             Server timestamp, milliseconds with fractions, taken when the command
-            was queued. The node echoes it back in `ping`, and the server derives
-            `rttMs` and the clock offset from it; it is also the only way for a
-            node to know how long the command waited in the queue.
+            was queued. It tells a node how long the command waited before it was
+            handed out; the server measures execution itself, through the `timing`
+            rule, and does not expect anything echoed back.
         session:
           type: string
           description: |

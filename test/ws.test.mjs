@@ -147,7 +147,7 @@ t('alive при отсутствии работы ставит ожидание,
   const { seq } = queue.enqueue({ nodeId: node.id, api: apiId, method: 'exec', args: { command: 'true' }, timeout: 5 })
   presence.notify(node.id)
   const state = await frame(socket, 'state')
-  assert.equal(state.state, seq)
+  assert.equal(state.max_commandno, seq)
   socket.close()
 })
 
@@ -207,7 +207,7 @@ t('alive с отставшим номером получает state сразу,
   const waitingState = frame(socket, 'state')
   socket.send(JSON.stringify({ t: 'alive', known: 0 }))
   const state = await waitingState
-  assert.equal(state.state, 1, 'кадр несёт номер последней команды')
+  assert.equal(state.max_commandno, 1, 'кадр несёт номер последней команды')
 
   // теперь клиент в курсе — сервер молчит и запоминает ожидание
   const maybeState = frame(socket, 'state')
@@ -225,7 +225,7 @@ t('alive с отставшим номером получает state сразу,
   queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
   presence.notify(node.id)
   const pushed = await pushedState
-  assert.equal(pushed.state, 2)
+  assert.equal(pushed.max_commandno, 2)
   socket.close()
 })
 
@@ -248,7 +248,7 @@ t('кадр уходит только ждущему: занятый узел н
   const pushed = frame(socket, 'state')
   socket.send(JSON.stringify({ t: 'alive', known: 0 }))
   const state = await pushed
-  assert.equal(state.state, 1)
+  assert.equal(state.max_commandno, 1)
   socket.close()
 })
 
@@ -286,7 +286,7 @@ t('события изолированы: работа одному узлу н�
   queue.enqueue({ nodeId: second.node.id, api: 1, method: 'exec', args: {} })
   presence.notify(second.node.id)
   const got = await secondState
-  assert.ok(got.state >= 1)
+  assert.ok(got.max_commandno >= 1)
   busy.close()
   idle.close()
 })
@@ -320,7 +320,7 @@ t('старое имя кадра alive продолжает работать', 
   const pushed = frame(socket, 'state')
   socket.send(JSON.stringify({ t: 'alive', known: 0 }))
   const state = await pushed
-  assert.equal(state.state, 1)
+  assert.equal(state.max_commandno, 1)
   socket.close()
 })
 
