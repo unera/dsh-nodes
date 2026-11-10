@@ -257,3 +257,36 @@ test('правило timing: пустой retNames — считаем и ник�
   // остаток от правила (internal) наружу всё равно не уходит — это делает nodes_call
 })
 
+
+test('правило timing не падает, когда считать нечего', async () => {
+  const { annotateTiming } = await import('../lib/tools.mjs')
+  const logged = []
+  const log = (level, event, details) => logged.push({ level, event, details })
+  const opts = { retNames: { durationMs: 'durationMs', clockSkewMs: 'clockSkewMs' } }
+
+  // 1. нет отметок правила: команда ушла мимо очереди с правилом
+  const noState = { status: 'ok', results: [{ type: 'text', text: '{"a":1}' }] }
+  assert.deepEqual(annotateTiming(noState, { opts, log }), noState)
+  // 2. ответ не JSON-объект: замер положить некуда
+  const notJson = { status: 'ok', internal: { ruleState: { startedAt: 1, finishedAt: 2 } }, results: [{ type: 'text', text: 'просто вывод' }] }
+  assert.deepEqual(annotateTiming(notJson, { opts, log }), notJson)
+  assert.equal(logged.length, 2, 'обе беды должны быть слышны')
+  for (const entry of logged) {
+    assert.equal(entry.level, 'error')
+    assert.equal(entry.event, 'special-rule-violated')
+    assert.equal(entry.details.rule, 'timing')
+  }
+  // 3. узел не прислал часы — это не ошибка: смещение просто не считается
+  const noClock = timingOutcome({ nodeNow: null })
+  assert.equal(annotateTiming(noClock, { opts, log }).results.length, 1)
+  assert.equal(logged.length, 2, 'отсутствие now — не повод ругаться')
+})
+
+test('правило timing кладёт только то, что просили', async () => {
+  const { annotateTiming } = await import('../lib/tools.mjs')
+  const filled = annotateTiming(timingOutcome(), { opts: { retNames: { durationMs: 'took' } } })
+  const payload = JSON.parse(filled.results[0].text)
+  assert.equal(typeof payload.took, 'number')
+  assert.equal('clockSkewMs' in payload, false, 'не просили — не кладём')
+  assert.equal('durationMs' in payload, false, 'кладём под именем из retNames, а не под канонным')
+})

@@ -702,6 +702,10 @@ components:
         The client's honest report of how the command ran. `mode` is the mode it
         actually used, not the one requested — the server trusts this number over
         its own expectations.
+
+        This model is not referenced by `$ref` from any response: it describes the
+        JSON object *inside* the last `results` text block (see `Result`), and a
+        string field cannot carry a schema.
       properties:
         mode:
           type: string
@@ -805,106 +809,6 @@ components:
           type: integer
           description: server generation, so a stale client notices it reconnected
 
-    PingReply:
-      type: object
-      description: |
-        Reply of a node to the `ping` method of its internal `session` API — the
-        cheap check "is this node alive and how far away is it".
-
-        The node fills what only it can know: its own clock and how long it has
-        been running. The round-trip time it cannot compute: that needs the
-        server's clock, which the node has never seen. So the field `rttMs` is
-        declared here and sent as `null`; the server fills it in place before the
-        answer reaches the model, together with `clockSkewMs`.
-
-        Reading the numbers: `rttMs` covers queueing plus network plus execution,
-        so on a loaded server it is larger than a network ping. `clockSkewMs` is
-        the node clock offset; on a slow round trip it grows by half of the extra
-        time, so compare clocks using the smallest values of a series, not one
-        measurement.
-      properties:
-        pong:
-          type: number
-          description: node wall clock at the moment of answering, milliseconds with fractions
-        rttMs:
-          type: number
-          nullable: true
-          description: round trip measured by the server; the node always sends `null`
-        clockSkewMs:
-          type: number
-          description: how far the node clock is ahead of the server, in milliseconds
-        sentAt:
-          type: number
-          nullable: true
-          description: |
-            The server timestamp echoed back (`issuedAt` of the command). Absent
-            on nodes that predate timing support; then `rttMs` stays `null`.
-        upSeconds:
-          type: integer
-          description: seconds since the node client process started; a delta, not a timestamp
-        platform:
-          type: string
-          description: node platform, e.g. `linux`
-        version:
-          type: string
-          description: client version, e.g. `dshnc/0.0.51`
-
-    CheckStateFrame:
-      type: object
-      description: |
-        Client to server, the only frame an idle node sends. It carries three
-        meanings at once, because for a polling-free client they always coincide:
-        "I am alive", "I know commands up to `known`", and "I am free, tell me if
-        there is work".
-
-        The server answers with `{t:"state", state:N}` only when `N > known`,
-        otherwise it stays silent and remembers that the node is waiting, so the
-        answer comes later, pushed by the new command. This is the whole reason
-        there is no periodic polling.
-      required: [t, known]
-      properties:
-        t: { type: string, enum: [check_state] }
-        known:
-          type: integer
-          nullable: true
-          description: |
-            Highest command number the client has seen. `null` means the client
-            lost its state, i.e. it restarted: the server answers at once and
-            closes every command it had handed to this node with `node_restarted`,
-            so the model learns the result is gone instead of waiting out its
-            timeout.
-
-    StateFrame:
-      type: object
-      description: |
-        Server to client: "you are behind, fetch commands". Carries the number so
-        the client can tell how far behind without an extra request.
-      required: [t, state]
-      properties:
-        t: { type: string, enum: [state] }
-        state:
-          type: integer
-          description: number of the last command queued for this node
-        epoch:
-          type: integer
-          description: server generation; a change means the server restarted
-
-    PingFrame:
-      type: object
-      description: |
-        Application-level liveness check over the socket. The client pings after
-        `pingInterval` of silence, stretching the pause up to
-        `maxPingIntervalFactor` times when the server has not sent commands for a
-        while. No answer within the interval means the connection is dead: the
-        client drops it and reconnects. The server may ping the client too, but
-        that direction is off by default.
-      required: [t, id]
-      properties:
-        t: { type: string, enum: [ping] }
-        id:
-          type: integer
-          description: sequence number chosen by the sender; the reply must carry the same one
-
     Command:
       type: object
       required: [seq, api, method, timeout]
@@ -979,18 +883,26 @@ components:
         ok: { type: boolean }
         code: { type: string, nullable: true, description: machine-readable error code }
         message: { type: string, nullable: true }
+        now:
+          type: number
+          description: |
+            The node's own wall clock at the moment it answered, milliseconds with
+            fractions. Every result carries it — it is a plain fact about the
+            answer, not rule-awareness. The server reads it only when a rule asks
+            for it: `timing` uses it to compute `clockSkewMs`, and nothing else
+            looks at it.
         results:
           type: array
           description: |
             Result blocks. The last one is usually a JSON object with `code`,
-            `signal`, `cwd` and `sandbox` (see SandboxFacts).
+            `signal`, `cwd` and `sandbox` (the shape is `SandboxFacts` below).
 
-            For `session.ping` the node declares `rttMs` in its reply but leaves
-            it `null`: a node cannot know the server's clock, so it cannot time
-            the round trip. The server fills the field in place (and adds
-            `clockSkewMs`, the node clock offset), leaving the shape of the reply
-            exactly what the node announced. No extra block, no extra fields on
-            every other call.
+            A method bound to the `timing` rule gets its numbers written into that
+            last JSON object, under the names the binding asked for in
+            `retNames`. The node takes no part in the measurement: `durationMs`
+            comes from the server's own stamps, and `clockSkewMs` from the `now`
+            field of this envelope. The only thing the node can prevent is the
+            skew — by not sending `now`.
           items:
             type: object
             properties:

@@ -941,26 +941,49 @@ t('аудит отдаёт имя узла, а не только номер', as
   assert.equal(row.nodeName, 'audit-name', 'человеку нужен имя, а не номер')
 })
 
-t('пинг размечен метками времени: отклик и разница часов считаются', async () => {
-  const { annotatePing, preciseNow } = await import('../lib/tools.mjs').then(async (tools) => ({
-    annotatePing: tools.annotatePing,
-    preciseNow: (await import('../lib/queue.mjs')).preciseNow,
-  }))
-  const sent = preciseNow() - 20
-  // часы узла ушли вперёд на полторы секунды
-  const outcome = { ok: true, results: [{ type: 'text', text: JSON.stringify({ pong: preciseNow() + 1500, sentAt: sent }) }] }
-  const annotated = annotatePing(outcome, { method: 'ping' })
-  assert.equal(annotated.results.length, 1, 'лишнего блока быть не должно')
-  const filled = JSON.parse(annotated.results[0].text)
-  assert.ok(filled.rttMs >= 20 && filled.rttMs < 100, `отклик должен быть около 20 мс, а вышел ${filled.rttMs}`)
-  assert.ok(filled.clockSkewMs > 1400 && filled.clockSkewMs < 1600, `разница часов около 1500 мс, а вышло ${filled.clockSkewMs}`)
-  assert.equal(filled.pong != null, true, 'ответ узла не теряется')
-})
+t('правило timing через настоящую очередь: длительность и смещение в ответе', async () => {
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'timing-node', defaultTimeout: 5 }) })
+  const nodeId = created.body.node.id
+  const announced = store.announce(nodeId, [
+    { name: 'session', version: '7', methods: [{ method: 'ping', args: { type: 'object' } }] },
+  ])
+  const apiId = announced.apis[0]
+  store.setNodeRules(nodeId, [{
+    apiId,
+    method: 'ping',
+    rule: 'timing',
+    opts: { retNames: { durationMs: 'durationMs', clockSkewMs: 'clockSkewMs' } },
+  }])
 
-t('не пинг — не трогаем результат', () => {
-  const outcome = { ok: true, results: [{ type: 'text', text: 'обычный вывод' }] }
-  const annotated = adminApi.annotate?.(outcome, { method: 'exec' }) ?? outcome
-  assert.deepEqual(annotated, outcome)
+  const tools = createTools({ store, queue, config: CONFIG, epoch: queue.epoch, sandboxFor: () => ({ mode: 'danger-full-access' }) })
+  const call = tools.find((tool) => tool.name === 'nodes_call')
+  const pending = call.execute({ node: nodeId, api: apiId, method: 'ping', data: {} }, {})
+
+  const take = async () => {
+    for (let i = 0; i < 60; i++) {
+      const got = queue.take(nodeId, { limit: 5 })
+      if (got.commands.length) return got.commands[0]
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('команда не выдалась')
+  }
+  const command = await take()
+  const nodeClock = Date.now() + 5000 // часы узла впереди на пять секунд
+  queue.close(nodeId, command.seq, {
+    ok: true,
+    now: nodeClock,
+    results: [{ type: 'text', text: JSON.stringify({ upSeconds: 10, platform: 'linux' }) }],
+  })
+  const value = await pending
+  const payload = JSON.parse(value.results.at(-1).text)
+  assert.equal(typeof payload.durationMs, 'number', 'длительность считает сервер')
+  assert.ok(payload.durationMs >= 0)
+  assert.ok(payload.clockSkewMs > 4000, `смещение около 5 секунд, а вышло ${payload.clockSkewMs}`)
+  assert.equal(payload.upSeconds, 10, 'ответ узла не теряется')
+  // внутренние отметки правила наружу не уходят
+  for (const key of ['internal', 'ruleState', 'startedAt', 'finishedAt', 'now']) {
+    assert.equal(key in payload, false, `${key} не должен попасть в ответ`)
+  }
 })
 
 
