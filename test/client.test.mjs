@@ -1,11 +1,12 @@
 /**
- * Клиентская половина: словари и сборка.
+ * The client half: dictionaries and the build.
  *
- * Ошибка, которую этот тест ловит, уже случалась: `t()` в панели читал `ru`
- * и `en`, а `i18n.js` к `index.js` подключён не был — сборка проходила, тесты
- * сервера тоже, а в браузере панель настроек падала с `ru is not defined`.
- * Поэтому проверяем не поведение, а связность: каждый ключ есть во всех
- * словарях, и в собранном бандле лежат сами словари и привязка к локали.
+ * The bug this test catches has already happened: `t()` in the panel read `ru`
+ * and `en`, but `i18n.js` was never imported into `index.js` — the build passed,
+ * the server tests passed too, and in the browser the settings panel crashed
+ * with `ru is not defined`. So we check wiring rather than behaviour: every key
+ * exists in all dictionaries, and the built bundle carries the dictionaries
+ * themselves and the locale binding.
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -22,19 +23,19 @@ const bundle = readFileSync(join(root, 'lib/client.js'), 'utf8')
 
 const keys = [...new Set([...source.matchAll(/\bt\('([\w.]+)'/g)].map((match) => match[1]))]
 
-test('ключей в панели достаточно много, чтобы проверка была не пустой', () => {
+test('the panel has enough keys for the check to be non-trivial', () => {
   assert.ok(keys.length > 20, `найдено ключей: ${keys.length}`)
 })
 
-test('каждый ключ панели есть во всех трёх словарях', () => {
+test('every panel key exists in all three dictionaries', () => {
   for (const [lang, dict] of Object.entries({ en, ru, zh })) {
     const missing = keys.filter((key) => !(key in dict))
     assert.deepEqual(missing, [], `${lang}: нет строк для ${missing.join(', ')}`)
   }
 })
 
-test('собранный клиент несёт словари и привязку к локали', () => {
-  // маркеры без минификации: сборка идёт с minify: false
+test('the built client carries the dictionaries and the locale binding', () => {
+  // markers that survive without minification: the build runs with minify: false
   const markers = ['var en = {', 'var ru = {', 'var zh = {', 'locale.register(NS', 'locale.bind(NS)']
   for (const marker of markers) {
     assert.ok(
@@ -45,11 +46,11 @@ test('собранный клиент несёт словари и привяз�
 })
 
 /**
- * Запуск настоящего бандла без браузера.
+ * Running the real bundle without a browser.
  *
- * Повторяет путь, на котором панель ломалась: `apply(ctx)` регистрирует
- * секцию, а подпись секции зовёт `t()`. Если словарей в бандле нет, здесь
- * будет то же самое `ru is not defined`, что и в консоли браузера.
+ * Repeats the path where the panel broke: `apply(ctx)` registers a section,
+ * and the section label calls `t()`. If the bundle has no dictionaries, we get
+ * the same `ru is not defined` here as in the browser console.
  */
 function loadBundle () {
   let loaded = null
@@ -69,7 +70,7 @@ function loadBundle () {
   })
 }
 
-/** Поддельный ctx: только то, что дёргает клиентская половина. */
+/** A fake ctx: only what the client half touches. */
 function fakeContext (sections, dictionaries) {
   const effects = []
   return {
@@ -92,7 +93,7 @@ function fakeContext (sections, dictionaries) {
           dictionaries.push({ ns, dicts })
           return () => {}
         },
-        // активный язык — русский: так видно, что подпись берётся из словаря
+        // the active language is Russian: this shows the label comes from the dictionary
         bind: (ns) => (key, vars) => {
           const text = ru[key] ?? en[key] ?? key
           if (!vars) return text
@@ -103,7 +104,7 @@ function fakeContext (sections, dictionaries) {
   }
 }
 
-test('панель монтируется и говорит по-русски', () => {
+test('the panel mounts and speaks Russian', () => {
   const sections = []
   const dictionaries = []
   const client = loadBundle()
@@ -122,19 +123,19 @@ test('панель монтируется и говорит по-русски', 
   assert.equal(definition.label(), 'Узлы')
 })
 
-test('панель строится без ошибок рендера на всех вкладках', async () => {
+test('the panel builds without render errors on all tabs', async () => {
   const bundle = await loadBundle()
   assert.equal(typeof bundle.apply, 'function')
-  // ловушка ошибок существует и панель зарегистрирована
+  // the error trap exists and the panel is registered
   const src = String(bundle.apply)
   assert.ok(src.length > 0)
 })
 
-test('панель ссылается только на объявленные переменные рендера', async () => {
+test('the panel references only declared render variables', async () => {
   const { readFileSync } = await import('node:fs')
   const src = readFileSync(new URL('../src/client/index.js', import.meta.url), 'utf8')
-  // эти имена появились при правке разметки: если объявление не вставилось,
-  // панель падала целиком с «X is not defined»
+  // these names appeared while fixing the markup: if the declaration was not
+  // inserted, the panel crashed entirely with X is not defined
   for (const name of ['linkAlive', 'secondsLeft', 'expiresAt']) {
     const declared = src.includes(`const ${name}`) || src.includes(`[${name},`) || src.includes(`const [${name}`)
     assert.ok(declared, `${name} используется, но не объявлен`)

@@ -1,8 +1,8 @@
-// Проверка, что схема протокола не отстаёт от кода.
+// Checking that the protocol schema keeps up with the code.
 //
-// Это ловит именно тот случай, когда маршрут или метод появился, а в
-// `spec/openapi.yaml` его нет: раньше схема расходилась с кодом на дни, и
-// заметить это можно было только вручную.
+// This catches exactly the case where a route or a method appeared but is
+// missing from `spec/openapi.yaml`: the schema used to drift from the code for
+// days, and the only way to notice it was by hand.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,11 +12,11 @@ import { parse as parseYaml } from 'yaml'
 const root = new URL('..', import.meta.url).pathname
 const read = (path) => readFileSync(join(root, path), 'utf8')
 const spec = read('spec/openapi.yaml')
-// разобранная схема: проверять структуру, а не искать подстроки
+// a parsed schema: check the structure instead of searching for substrings
 const schema = parseYaml(spec)
 const components = schema.components?.schemas ?? {}
 
-/** Маршруты, которые сервер действительно обрабатывает. */
+/** Routes the server really handles. */
 function serverRoutes () {
   const source = read('lib/server.mjs')
   const found = new Map()
@@ -26,7 +26,7 @@ function serverRoutes () {
   return found
 }
 
-/** Кадры websocket, которые сервер понимает или отправляет. */
+/** WebSocket frames the server understands or sends. */
 function wsFrames () {
   const source = read('lib/ws.mjs') + read('lib/queue.mjs')
   const kinds = new Set()
@@ -35,10 +35,10 @@ function wsFrames () {
   return kinds
 }
 
-/** Методы клиентских API: то, что узел объявляет при announce. */
+/** Client API methods: what a node declares on announce. */
 async function clientMethods () {
-  // объявления живут в репозитории клиента; в CI его может не быть, поэтому
-  // отсутствие файлов — повод пропустить проверку, а не упасть
+  // the declarations live in the client repository; CI may not have it, so
+  // missing files are a reason to skip the check, not to fail
   const modules = ['../dsh-node-client/lib/plugins/files.mjs', '../dsh-node-client/lib/plugins/session.mjs']
   const names = new Set()
   for (const path of modules) {
@@ -52,7 +52,7 @@ async function clientMethods () {
   return names
 }
 
-test('каждый маршрут сервера описан в схеме', () => {
+test('every server route is described in the schema', () => {
   const missing = []
   for (const [path, method] of serverRoutes()) {
     if (!spec.includes(`  ${path}:`)) missing.push(`${method.toUpperCase()} ${path}`)
@@ -60,20 +60,20 @@ test('каждый маршрут сервера описан в схеме', ()
   assert.deepEqual(missing, [], `нет в spec/openapi.yaml: ${missing.join(', ')}`)
 })
 
-test('каждый кадр websocket описан в схеме', () => {
+test('every websocket frame is described in the schema', () => {
   const declared = /x-ws-frames:\s*\n((?:\s+-\s+\S+\n)+)/.exec(spec)?.[1] ?? ''
   const known = new Set([...declared.matchAll(/-\s+(\S+)/g)].map((match) => match[1]))
   const missing = [...wsFrames()].filter((frame) => !known.has(frame))
   assert.deepEqual(missing, [], `кадры не описаны в x-ws-frames: ${missing.join(', ')}`)
 })
 
-test('каждый метод клиентских API упомянут в схеме', async (t) => {
+test('every client API method is mentioned in the schema', async (t) => {
   const methods = await clientMethods()
   if (!methods) {
     t.skip('клиентский репозиторий не найден рядом')
     return
   }
-  // ищем там, где методам положено быть: в описаниях маршрутов и моделей
+  // we look where methods belong: in route and model descriptions
   const described = new Set()
   const walk = (node) => {
     if (Array.isArray(node)) return node.forEach(walk)
@@ -89,16 +89,16 @@ test('каждый метод клиентских API упомянут в сх�
   assert.deepEqual(missing, [], `методы не описаны: ${missing.join(', ')}`)
 })
 
-test('соглашения протокола описаны в схеме', () => {
-  // правила, которые нельзя вывести из отдельного маршрута: где живут события,
-  // что значит решётка, как отменяют работу
+test('the protocol conventions are described in the schema', () => {
+  // rules that cannot be derived from a single route: where events live,
+  // what the hash prefix means, how work is cancelled
   assert.match(spec, /x-protocol-rules:/)
   assert.match(spec, /control-prefix:\s*"#"/)
   assert.match(spec, /control-api:\s*-1/)
   assert.match(spec, /INTERNAL\.CANCEL/)
 })
 
-test('applyRules проверяет привязку и отказывает объявлению целиком', async () => {
+test('applyRules checks the binding and rejects the whole declaration', async () => {
   const { parseApplyRules } = await import('../lib/special-rules.mjs')
   const defs = {
     session: { id: 7, def: { name: 'session', version: 'v1', methods: [{ method: 'ping' }, { method: 'chdir' }] } },
@@ -108,11 +108,11 @@ test('applyRules проверяет привязку и отказывает о�
 
   const ok = parseApplyRules([{ api: 'session', method: 'chdir', rule: 'flushAround' }], { resolve })
   assert.deepEqual(ok.errors, [])
-  // привязка ссылается на имя: номер API выдаёт транзакция объявления
+  // a binding refers by name: the API number is issued by the announce transaction
   assert.deepEqual(ok.bindings, [{ api: 'session', version: null, method: 'chdir', rule: 'flushAround', opts: null }])
   assert.deepEqual(ok.warnings, [])
 
-  // всё, что не сходится, — отказ, а не тихий пропуск
+  // anything that does not add up is a rejection, not a silent skip
   const unknownRule = parseApplyRules([{ api: 'session', method: 'chdir', rule: 'nope' }], { resolve })
   assert.match(unknownRule.errors[0], /неизвестно/)
   const unknownApi = parseApplyRules([{ api: 'files', method: 'exec', rule: 'timing' }], { resolve })
@@ -136,7 +136,7 @@ test('applyRules проверяет привязку и отказывает о�
   assert.match(reserved.errors[0], /служебное имя/)
 })
 
-test('timing без retNames принимается, но предупреждает: мерить в стол можно, терять — нет', async () => {
+test('timing without retNames is accepted but warns: measuring without keeping is allowed, losing is not', async () => {
   const { parseApplyRules } = await import('../lib/special-rules.mjs')
   const resolve = () => ({ id: 1, def: { name: 'session', version: 'v1', methods: [{ method: 'ping' }] } })
   const result = parseApplyRules([{ api: 'session', method: 'ping', rule: 'timing' }], { resolve })
@@ -145,7 +145,7 @@ test('timing без retNames принимается, но предупрежда
   assert.match(result.warnings[0], /retNames пуст/)
   assert.equal(result.bindings[0].opts, null)
 
-  // null в retNames — «этого поля нет, не кладём», и это уже осознанный выбор
+  // null in retNames means this field is absent and is not stored, and that is a deliberate choice
   const withNull = parseApplyRules([{
     api: 'session', method: 'ping', rule: 'timing', rulesOpts: { retNames: { durationMs: 'took', clockSkewMs: null } },
   }], { resolve })
@@ -153,9 +153,9 @@ test('timing без retNames принимается, но предупрежда
   assert.deepEqual(withNull.bindings[0].opts, { retNames: { durationMs: 'took' } })
 })
 
-test('привязка метода к правилу описана в схеме announce', () => {
-  // правила объявляются отдельным списком, а не полем внутри apidef: внешний
-  // источник контракта не должен знать про серверные правила
+test('binding a method to a rule is described in the announce schema', () => {
+  // rules are declared as a separate list rather than a field inside apidef: an
+  // external contract source must not know about server-side rules
   assert.match(spec, /applyRules:/, 'в Announce должно быть поле applyRules')
   const announce = spec.slice(spec.indexOf('    Announce:'), spec.indexOf('    AnnounceAccepted:'))
   assert.match(announce, /enum: \[timing, flushBefore, flushAfter, flushAround\]/,

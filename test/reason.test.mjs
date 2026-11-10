@@ -1,5 +1,5 @@
 /**
- * Текст вопроса об апруве: человек принимает решение только по нему.
+ * The text of the approval question: a human decides on nothing else.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -8,7 +8,7 @@ import { escalationReason } from '../lib/reason.mjs'
 
 const node = { id: 5, name: 'nbw', workdir: '/home/unera/work/ai/.dsh' }
 
-test('в вопросе есть узел, команда, режимы и разовость', () => {
+test('the question carries the node, the command, the modes and the one-off nature', () => {
   const text = escalationReason({
     node,
     args: { method: 'exec', data: { command: 'touch /etc/passwd' } },
@@ -24,7 +24,7 @@ test('в вопросе есть узел, команда, режимы и ра�
   assert.match(text, /выполнится заново целиком/, 'человек должен знать, что команда пойдёт с начала')
 })
 
-test('длинная команда обрезается, а не рвёт диалог', () => {
+test('a long command is truncated instead of breaking the dialogue', () => {
   const text = escalationReason({
     node,
     args: { data: { command: `echo ${'x'.repeat(500)}` } },
@@ -37,7 +37,7 @@ test('длинная команда обрезается, а не рвёт ди�
   assert.match(text, /без песочницы/, 'у full понятное объяснение')
 })
 
-test('без команды текст остаётся осмысленным', () => {
+test('without a command the text stays meaningful', () => {
   const text = escalationReason({ node, args: {}, report: {}, current: 'ro', target: 'full' })
   assert.match(text, /нет доступа/)
   assert.doesNotMatch(text, /Команда:/)

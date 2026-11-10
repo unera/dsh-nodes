@@ -1,5 +1,5 @@
 /**
- * Очередь: выдача, закрытие, поиск по номеру.
+ * Queue: issuing, closing, lookup by number.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { Queue } from '../lib/queue.mjs'
 
 
-test('issued находит выданную команду по номеру', () => {
+test('issued finds an issued command by number', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'files.upload', args: { path: '/tmp/x' }, timeout: 30 })
   const found = queue.issued(1, seq)
@@ -17,14 +17,14 @@ test('issued находит выданную команду по номеру', 
   assert.equal(queue.issued(1, seq + 999), null, 'чужой номер не выдавали')
 })
 
-test('ждущую команду отменять не нужно: узел её не видел', () => {
-  // проверяем правило, а не детали: CANCEL — только для взятых в работу
+test('a waiting command needs no cancellation: the node never saw it', () => {
+  // we check the rule rather than the details: CANCEL only for commands taken into work
   const source = readFileSync(new URL('../lib/queue.mjs', import.meta.url), 'utf8')
   const matches = source.match(/command\.status === 'processing'/g) ?? []
   assert.ok(matches.length >= 2, 'обе точки закрытия должны проверять, что команда в работе')
 })
 
-test('flushAround: барьер до, барьер после, команда — между ними', () => {
+test('flushAround: a barrier before, a barrier after, the command between them', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({
     nodeId: 1, api: 7, method: 'chdir', args: {}, flushBefore: true, flushAfter: true,
@@ -44,8 +44,8 @@ test('flushAround: барьер до, барьер после, команда �
   assert.equal(middle[0].method, 'chdir')
   assert.equal(middle[0].seq, seq, 'команда получила свой номер после барьера')
 
-  // второй барьер выдаётся сам (он же должен доехать до узла), но за ним уже
-  // ничего нет — и всё, что встало бы после него, ждало бы его ответа
+  // the second barrier is issued on its own (it has to reach the node), but
+  // nothing stands behind it — anything placed after it would wait for its answer
   queue.close(1, seq, { ok: true })
   const last = queue.take(1, { limit: 5 }).commands
   assert.equal(last.length, 1, 'второй барьер уходит один')
@@ -53,7 +53,7 @@ test('flushAround: барьер до, барьер после, команда �
   assert.equal(last[0].seq, seq + 1)
 })
 
-test('flushBefore и flushAfter ставят по одному барьеру', () => {
+test('flushBefore and flushAfter each place one barrier', () => {
   const queue = new Queue({ epoch: 1 })
   const before = queue.enqueue({ nodeId: 1, api: 7, method: 'a', args: {}, flushBefore: true })
   const after = queue.enqueue({ nodeId: 1, api: 7, method: 'b', args: {}, flushAfter: true })
@@ -69,21 +69,21 @@ test('flushBefore и flushAfter ставят по одному барьеру', 
   assert.equal(afterBarrier.seq, 4)
 })
 
-test('без правила барьеров нет', () => {
+test('without the rule there are no barriers', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
   assert.equal(seq, 1, 'первая команда узла получает первый номер')
   assert.deepEqual(queue.take(1, { limit: 5 }).commands.map((command) => command.method), ['exec'])
 })
 
-test('барьер живёт меньше служебных суток: он держит очередь', () => {
+test('a barrier lives less than the service day: it holds the queue', () => {
   const queue = new Queue({ epoch: 1, barrierTimeout: 90 })
   queue.enqueue({ nodeId: 1, api: 7, method: 'chdir', args: {}, flushBefore: true })
   const [barrier] = queue.take(1).commands
   assert.equal(barrier.timeout, 90, 'срок барьера — свой, а не суточный, как у CANCEL')
 })
 
-test('потерянный барьер не держит очередь вечно и попадает в журнал', () => {
+test('a lost barrier does not hold the queue forever and reaches the log', () => {
   const queue = new Queue({ epoch: 1, barrierTimeout: 1 })
   const log = []
   queue.setControlLog((nodeId, method, args, outcome) => log.push({ nodeId, method, outcome }))
@@ -98,10 +98,10 @@ test('потерянный барьер не держит очередь веч�
   void barrier
 })
 
-test('аборт вызова просит узел остановиться', () => {
+test('aborting a call asks the node to stop', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { command: 'sleep 120' } })
-  // команду уже выдали: она в работе на узле
+  // the command was already issued: it is in work on the node
   assert.equal(queue.take(1).commands[0].seq, seq)
   assert.equal(queue.cancel(1, seq), true)
 
@@ -112,14 +112,14 @@ test('аборт вызова просит узел остановиться', (
   assert.equal(next[0].args.seq, seq, 'отменяем именно ту команду, которую взяли')
 })
 
-test('аборт ждущей команды не шлёт CANCEL: узел её не видел', () => {
+test('aborting a waiting command sends no CANCEL: the node never saw it', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
   assert.equal(queue.cancel(1, seq), true)
   assert.deepEqual(queue.take(1).commands, [], 'незачем будить узел ради того, чего он не брал')
 })
 
-test('поздний результат после таймаута — это «уже закрыта», а не «нет команды»', () => {
+test('a late result after a timeout means already closed, not no command', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {}, timeout: 0.01 })
   queue.take(1)
@@ -130,7 +130,7 @@ test('поздний результат после таймаута — это �
   assert.equal(queue.close(1, seq, { ok: true, results: [] }), 'already')
 })
 
-test('управляющая команда будит узел, а не ждёт, пока он проснётся сам', () => {
+test('a control command wakes the node instead of waiting for it to wake up on its own', () => {
   const queue = new Queue({ epoch: 1 })
   const woken = []
   queue.setNotify((nodeId) => woken.push(nodeId))
@@ -138,7 +138,7 @@ test('управляющая команда будит узел, а не ждё�
   assert.deepEqual(woken, [1], 'без побудки отмена лежит в очереди до случайного просыпания')
 })
 
-test('отмена обгоняет пользовательскую работу в очереди', () => {
+test('a cancellation overtakes user work in the queue', () => {
   const queue = new Queue({ epoch: 1 })
   queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 1 } })
   queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 2 } })
@@ -150,9 +150,9 @@ test('отмена обгоняет пользовательскую работ�
   assert.deepEqual(batch.slice(1).map((command) => command.args.n), [1, 2], 'остальное — в порядке постановки')
 })
 
-test('отмена проходит сквозь барьер, а обычная работа за ним стоит', () => {
+test('a cancellation passes through a barrier while ordinary work waits behind it', () => {
   const queue = new Queue({ epoch: 1 })
-  // барьер перед командой «b» (flushBefore), затем ещё одна обычная команда
+  // a barrier before command "b" (flushBefore), then one more ordinary command
   queue.enqueue({ nodeId: 1, api: 7, method: 'a', args: {} })
   queue.enqueue({ nodeId: 1, api: 7, method: 'b', args: {}, flushBefore: true })
   queue.enqueue({ nodeId: 1, api: 7, method: 'c', args: {} })
@@ -162,7 +162,7 @@ test('отмена проходит сквозь барьер, а обычная
   assert.equal(batch[0].seq, cancelSeq, 'приоритетная команда обгоняет всё')
   assert.deepEqual(batch.slice(1).map((command) => command.method), ['a'], 'до барьера обычная работа идёт')
 
-  // барьер выдан отдельно, за ним ничего
+  // the barrier is issued separately, nothing stands behind it
   queue.close(1, batch[0].seq, { ok: true })
   queue.close(1, batch[1].seq, { ok: true })
   const barrier = queue.take(1, { limit: 5 }).commands
@@ -170,7 +170,7 @@ test('отмена проходит сквозь барьер, а обычная
   assert.equal(barrier[0].method, '#INTERNAL.FLUSH')
 })
 
-test('потолок очереди не распространяется на управляющие команды, а обычным говорит по-человечески', async () => {
+test('the queue limit does not apply to control commands and answers ordinary ones in plain words', async () => {
   const queue = new Queue({ epoch: 1, maxQueue: 2 })
   queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 1 } })
   queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: { n: 2 } })
@@ -181,12 +181,12 @@ test('потолок очереди не распространяется на �
   assert.match(outcome.message, /перегружен/, 'модели надо объяснить, что случилось')
   assert.match(outcome.message, /сбавь темп/)
 
-  // отмена в забитую очередь всё равно проходит
+  // a cancellation still passes into a full queue
   const cancelSeq = queue.control(1, '#INTERNAL.CANCEL', { seq: 1, reason: 'abort' })
   assert.ok(cancelSeq, 'управляющая команда не подчиняется потолку')
 })
 
-test('take и info называют номер max_commandno', () => {
+test('take and info report the number as max_commandno', () => {
   const queue = new Queue({ epoch: 1 })
   queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
   queue.enqueue({ nodeId: 1, api: 7, method: 'exec', args: {} })
@@ -196,7 +196,7 @@ test('take и info называют номер max_commandno', () => {
   assert.equal(taken.commands.length, 1)
 })
 
-test('аборт закрывает висящий вопрос человеку, а не только процессы', () => {
+test('aborting closes a pending question to a human, not only processes', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({
     nodeId: 1, api: -1, method: '#INTERNAL.APPROVE', args: { id: 'x', text: 't' }, timeout: 86400, priority: 5,
@@ -210,10 +210,10 @@ test('аборт закрывает висящий вопрос человеку
   assert.equal(next[0].args.seq, seq)
 })
 
-test('сама отмена себя не отменяет: рекурсии нет', () => {
+test('a cancellation does not cancel itself: there is no recursion', () => {
   const queue = new Queue({ epoch: 1 })
   const seq = queue.control(1, '#INTERNAL.CANCEL', { seq: 1, reason: 'timeout' })
-  queue.take(1)               // отмена ушла на узел и висит
+  queue.take(1)               // the cancellation went to the node and is pending
   const before = queue.info(1).queued
   queue.cancel(1, seq)
   assert.equal(queue.info(1).queued, before - 1, 'команда снята и второй отмены не породила')

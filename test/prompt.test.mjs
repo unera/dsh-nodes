@@ -3,14 +3,14 @@ import { test } from 'node:test'
 
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from '../lib/prompt.mjs'
 
-test('секция промпта на месте и короткая', () => {
+test('the prompt section is in place and short', () => {
   assert.equal(SECTION_NAME, 'dsh-nodes')
   assert.ok(SECTION_ORDER > 0)
   assert.ok(PROMPT_TEXT.length > 500, 'иначе модель не поймёт, что это за тулы')
   assert.ok(PROMPT_TEXT.length < 3000, 'промпт не должен съедать контекст сам по себе')
 })
 
-test('в промпте есть правила, без которых модель ошибётся', () => {
+test('the prompt carries the rules without which the model would go wrong', () => {
   for (const needle of [
     'nodes_list',
     'nodes_catalog',
@@ -24,6 +24,6 @@ test('в промпте есть правила, без которых моде�
   }
 })
 
-test('промпт не обещает отмены на узле', () => {
+test('the prompt does not promise cancellation on the node', () => {
   assert.match(PROMPT_TEXT, /Отмены на узле нет/)
 })

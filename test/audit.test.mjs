@@ -1,5 +1,5 @@
 /**
- * Аудит: что попадает в журнал, что в базу, и почему база не растёт.
+ * Audit: what goes to the journal, what goes to the database, and why the database does not grow.
  */
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -11,12 +11,12 @@ import { logLine, recordAudit } from '../lib/audit.mjs'
 import { Store } from '../lib/db.mjs'
 
 function freshStore () {
-  // ':memory:' — миграции те же, файл не нужен
+  // ':memory:' — the migrations are the same, no file needed
   const dir = mkdtempSync(join(tmpdir(), 'dsh-nodes-audit-'))
   return { store: new Store(join(dir, 'state.sqlite')), dir }
 }
 
-test('строка журнала несёт syslog-приоритет', () => {
+test('the log line carries a syslog priority', () => {
   const lines = []
   const stream = { write: (text) => lines.push(text) }
   logLine('warn', 'что-то пошло не так', stream)
@@ -24,7 +24,7 @@ test('строка журнала несёт syslog-приоритет', () => {
   assert.deepEqual(lines, ['<4>что-то пошло не так\n', '<6>всё хорошо\n'])
 })
 
-test('решение человека и отказ попадают в журнал с нужной важностью', () => {
+test('a human decision and a denial reach the log with the right severity', () => {
   const { store, dir } = freshStore()
   const lines = []
   const stream = { write: (text) => lines.push(text) }
@@ -40,7 +40,7 @@ test('решение человека и отказ попадают в журн
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('база — кольцевой буфер: старые записи вытесняются', () => {
+test('the database is a ring buffer: old records are evicted', () => {
   const { store, dir } = freshStore()
   for (let i = 0; i < 50; i++) {
     recordAudit({ store, config: { maxAuditRows: 20 }, stream: { write: () => {} }, event: { kind: 'exec', node: 1, command: `echo ${i}` } })
@@ -52,7 +52,7 @@ test('база — кольцевой буфер: старые записи вы
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('совсем старые записи удаляются по возрасту', () => {
+test('very old records are removed by age', () => {
   const { store, dir } = freshStore()
   store.writeAudit({ kind: 'exec', node: 1, command: 'старьё', at: Date.now() - 30 * 24 * 60 * 60 * 1000 })
   recordAudit({ store, config: { maxAuditAgeDays: 7 }, stream: { write: () => {} }, event: { kind: 'exec', node: 1, command: 'свежее' } })
@@ -63,7 +63,7 @@ test('совсем старые записи удаляются по возра�
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('длинная команда обрезается, сбой базы не мешает журналу', () => {
+test('a long command is truncated and a database failure does not block the log', () => {
   const lines = []
   const stream = { write: (text) => lines.push(text) }
   const broken = { writeAudit: () => { throw new Error('база упала') }, trimAudit: () => {} }
