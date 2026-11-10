@@ -75,3 +75,12 @@ test('каждый метод клиентских API упомянут в сх�
   const missing = [...methods].filter((name) => !spec.includes(name))
   assert.deepEqual(missing, [], `методы не описаны: ${missing.join(', ')}`)
 })
+
+test('соглашения протокола описаны в схеме', () => {
+  // правила, которые нельзя вывести из отдельного маршрута: где живут события,
+  // что значит решётка, как отменяют работу
+  assert.match(spec, /x-protocol-rules:/)
+  assert.match(spec, /control-prefix:\s*"#"/)
+  assert.match(spec, /control-api:\s*-1/)
+  assert.match(spec, /CONTROL\.CANCEL/)
+})

@@ -86,6 +86,22 @@ x-client-methods:
     - approve
     - debug_info
 
+# Соглашения протокола, которые не видны из отдельного маршрута.
+# Подробно — spec/AGENTS.md; здесь коротко и машинночитаемо.
+x-protocol-rules:
+  websocket: state only (hello/check_state/state); ping/pong is the single
+    exception and a failed ping drops the socket
+  control-prefix: "#"
+  control-api: -1
+  control-namespace: internal
+  control-example: "#INTERNAL.CANCEL"
+  control-ttl-seconds: 86400
+  control-tolerates: [late delivery, duplicates, missing target]
+  commands-are-tickets: transfer routes are authorised by the served command
+  streams: written to <hostPath>.inprogress and renamed only after a success
+    verdict; the path is computed by the server, never taken from the body
+  ephemeral: [command queue, seq counter]
+
 paths:
   /v1/enroll:
     post:
