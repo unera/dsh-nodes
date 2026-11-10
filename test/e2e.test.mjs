@@ -162,6 +162,8 @@ t('таймаут снимает команду и отдаёт timeout ожид
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
   const { promise, seq } = queue.enqueue({ nodeId: node.id, api: apiId, method: 'exec', args: { command: 'sleep 30' }, timeout: 0.05 })
+  // узел взял команду в работу: только такую имеет смысл отменять
+  queue.take(node.id, { limit: 1 })
   const outcome = await promise
   assert.equal(outcome.status, 'timeout')
   // таймаут не просто снимает команду: узлу кладётся управляющая отмена,
