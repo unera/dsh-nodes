@@ -147,6 +147,10 @@ export function apply (ctx, config) {
     sessions: ctx.sessions ?? null,
     sessionController: ctx.sessionController ?? null,
   }
+  // результат служебной команды никто не ждёт: пишем в журнал, если не ok
+  queue.setControlLog?.((nodeId, method, args, outcome) => {
+    log('warn', 'control-failed', { node: nodeId, method, args, code: outcome?.code ?? null })
+  })
   const server = createNodesServer({ store, queue, config, log, presence, services })
 
   const disposers = []

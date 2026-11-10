@@ -141,3 +141,16 @@ test('просили full без strict: режим уходит узлу как
   // и апрува нет: отказ ядра не наступал, поднимать не из чего
   assert.equal(sent.filter((command) => command.method === 'approve').length, 0)
 })
+
+test('управляющая команда: без ожидания, с суточным сроком, api -1', async () => {
+  const { CONTROL_API } = await import('../lib/queue.mjs')
+  const created = store.createNode({ name: 'ctrl-node' })
+  const nodeId = created.node.id
+  const seq = queue.control(nodeId, 'CANCEL', { seq: 7, reason: 'timeout' })
+  assert.ok(seq, 'команда должна получить номер')
+  const issued = queue.issued(nodeId, seq)
+  assert.equal(issued.api, CONTROL_API, 'служебные команды идут под псевдо-API -1')
+  assert.equal(issued.method, 'CANCEL')
+  assert.deepEqual(issued.args, { seq: 7, reason: 'timeout' })
+  assert.equal(issued.timeout, 86_400, 'сутки, а не обычный таймаут')
+})
