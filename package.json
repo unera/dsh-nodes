@@ -1,6 +1,6 @@
 {
   "name": "@dr-co/dsh-nodes",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "description": "Run commands on remote machines from a DSH session: sandboxed (ro/rw/full), policy-controlled, audited",
   "type": "module",
   "main": "./index.mjs",
@@ -17,7 +17,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-timeout=180000 test/*.test.mjs",
     "build:client": "node scripts/build-client.mjs"
   },
   "keywords": [
