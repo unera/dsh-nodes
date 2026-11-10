@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { buildNotification, describeAnswer, notificationId, MAX_BUTTONS } from '../lib/notifications.mjs'
 
-test('уведомление ограничивает кнопки и подписи', () => {
+test('a notification limits buttons and labels', () => {
   const built = buildNotification({
     id: 'n-1',
     title: 'Перезагрузить?',
@@ -15,22 +15,22 @@ test('уведомление ограничивает кнопки и подпи
   assert.equal(built.buttons[0].id, 'b1', 'у кнопки есть машинный id, а не только подпись')
 })
 
-test('заголовок и текст не растягиваются без предела', () => {
+test('the title and the text do not stretch without a limit', () => {
   const built = buildNotification({ id: 'n-2', title: 'x'.repeat(500), text: 'y'.repeat(2000) })
   assert.ok(built.title.length <= 80)
   assert.ok(built.text.length <= 500)
 })
 
-test('пустой заголовок заменяется именем по умолчанию', () => {
+test('an empty title is replaced with the default name', () => {
   assert.equal(buildNotification({ id: 'n-3', title: '  ', text: 'т' }).title, 'dsh-nodes')
 })
 
-test('номер уведомления уникален', () => {
+test('the notification id is unique', () => {
   const ids = new Set(Array.from({ length: 200 }, () => notificationId()))
   assert.equal(ids.size, 200)
 })
 
-test('нажатие переводится в подпись, смысл и сессию', () => {
+test('a click is translated into a label, a purpose and a session', () => {
   const described = describeAnswer({
     notification: { buttons: [{ id: 'b2', label: 'нет' }], purpose: 'спросить про перезагрузку', session: 'session-x' },
     button: 'b2',

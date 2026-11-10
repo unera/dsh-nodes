@@ -1,8 +1,8 @@
 /**
- * Сквозной тест передачи файла по HTTP: настоящий сервер, настоящий поток.
+ * An end-to-end file transfer test over HTTP: a real server, a real stream.
  *
- * Это тот тест, которого не хватило: обработчик звал несуществующий `send`,
- * и отказ видели только на живом узле.
+ * This is the test we were missing: the handler called a nonexistent `send`,
+ * and the failure was visible only on a live node.
  */
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -41,13 +41,13 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** Выдать команду так, как это делает сервер перед передачей. */
+/** Issue a command the way the server does before a transfer. */
 function issue (method, args) {
   const node = store.nodeByAlias('test-node')
   return queue.enqueue({ nodeId: node.id, api: 1, method, args, timeout: 30 })
 }
 
-test('download-file отдаёт файл с размером и токеном узла', async () => {
+test('download-file returns the file with its size and the node token', async () => {
   const path = join(dir, 'payload.bin')
   const body = Buffer.from([1, 2, 3, 250, 251, 13, 10])
   writeFileSync(path, body)
@@ -61,7 +61,7 @@ test('download-file отдаёт файл с размером и токеном 
   assert.deepEqual(Buffer.from(await res.arrayBuffer()), body)
 })
 
-test('без команды — 403 с текстом, без токена — 401', async () => {
+test('no command gives a 403 with text, no token gives a 401', async () => {
   const noCommand = await fetch(`${base}/v1/download-file?seq=999`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-length': '0' },
@@ -74,7 +74,7 @@ test('без команды — 403 с текстом, без токена — 4
   assert.equal(noToken.status, 401)
 })
 
-test('upload-file принимает тело и сверяет размер', async () => {
+test('upload-file accepts the body and verifies the size', async () => {
   const path = join(dir, 'incoming.bin')
   const body = Buffer.from('hello world')
   const { seq } = issue('copyFromDevice', { path: '/node/path', hostPath: path, size: body.length })
@@ -90,22 +90,22 @@ test('upload-file принимает тело и сверяет размер', a
   assert.deepEqual(readFileSync(path), body)
 })
 
-test('панель и сервер сходятся на маршруте операций', async () => {
-  // админ-маршруты живут в connection.fetch и в этом сервере не монтируются,
-  // поэтому проверяем статически: панель шлёт на /op, и маршрут должен быть
+test('the panel and the server agree on the operations route', async () => {
+  // admin routes live in connection.fetch and are not mounted in this server,
+  // so we check statically: the panel posts to /op and the route must be there
   const { readFileSync } = await import('node:fs')
   const source = readFileSync(new URL('../index.mjs', import.meta.url), 'utf8')
   assert.match(source, /path: '\/api\/dsh-nodes\/op'/, 'маршрут /op не зарегистрирован — панель получит 404')
 })
 
-test('событие устройства: без сессии и текста — 400, с ними — доставлено', async () => {
+test('a device event: without a session and text it is a 400, with them it is delivered', async () => {
   const delivered = []
   const services = {
     sessions: { flush: async () => true },
     sessionController: {
       resolveAgent: async (id) => ({
         agent: {
-          // заглушка агента: запоминаем, что именно положили в сессию
+          // an agent stub: we remember exactly what was put into the session
           session: { id },
           followup: (message) => delivered.push(message),
         },
@@ -135,7 +135,7 @@ test('событие устройства: без сессии и текста �
   await new Promise((resolve) => srv.close(resolve))
 })
 
-test('повторный pair с тем же uuid переподключает узел, а не плодит новый', async () => {
+test('pairing again with the same uuid reconnects the node instead of making a new one', async () => {
   const code1 = store.createPairing('probe-code-1', { ttlSeconds: 600 })
   const first = await fetch(`${base}/v1/pair`, {
     method: 'POST',
@@ -160,7 +160,7 @@ test('повторный pair с тем же uuid переподключает �
 })
 
 
-test('нажатие кнопки приходит подписью, а не машинным номером', async () => {
+test('a button press arrives as a label, not as a machine id', async () => {
   const delivered = []
   const services = {
     sessions: { flush: async () => true },
@@ -204,17 +204,17 @@ test('нажатие кнопки приходит подписью, а не м�
     assert.match(message, /проверка кнопок/, 'смысл берётся из записи сервера')
     assert.ok(!/b1/.test(message), 'машинный номер человеку не показываем')
   } finally {
-    // сервер закрываем всегда: незакрытый держал процесс и тест «висел»
+    // always close the server: an unclosed one held the process and the test hung
     await new Promise((resolve) => srv.close(resolve))
   }
 })
 
-test('пайп: поток без content-length принимается, но ждёт вердикта', async () => {
+test('pipe: a stream without content-length is accepted but waits for the verdict', async () => {
   const { existsSync, readFileSync, rmSync } = await import('node:fs')
   const hostPath = join(dir, 'pipe-test.out')
   rmSync(hostPath, { force: true })
   rmSync(`${hostPath}.inprogress`, { force: true })
-  // команду выдаём тому же узлу, чей токен используется в запросе
+  // we issue the command to the same node whose token the request uses
   const { seq } = issue('pipeFromDevice', { command: 'echo', hostPath })
   const logs = []
   try {
@@ -251,7 +251,7 @@ test('пайп: поток без content-length принимается, но ж
 })
 
 
-test('пайп: отказ по вердикту удаляет временный файл', async () => {
+test('pipe: a rejection by the verdict removes the temporary file', async () => {
   const { existsSync, rmSync, writeFileSync } = await import('node:fs')
   const hostPath = join(dir, 'pipe-fail.out')
   rmSync(hostPath, { force: true })
@@ -285,11 +285,11 @@ test('пайп: отказ по вердикту удаляет временны
   }
 })
 
-test('поддельный pendingPath не может удалить чужой файл', async () => {
+test('a forged pendingPath cannot delete a foreign file', async () => {
   const { existsSync, writeFileSync, rmSync } = await import('node:fs')
   const victim = join(dir, 'victim.txt')
   writeFileSync(victim, 'не трогать')
-  // команда обычная (exec), пайпа не было: путь из тела должен игнорироваться
+  // the command is an ordinary exec, there was no pipe: the path from the body must be ignored
   const { seq } = issue('exec', { command: 'true' })
   try {
     const closed = await fetch(`${base}/v1/commands/${seq}/result`, {

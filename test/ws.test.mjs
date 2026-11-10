@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs'
 
-// соседний репозиторий клиента есть локально, но не в CI: без него эти тесты
-// не про то, что собирается здесь, а про контракт двух репозиториев
+// the sibling client repository exists locally but not in CI: without it these
+// tests are not about what is built here but about the contract of two repositories
 const hasClient = existsSync(new URL('../../dsh-node-client/lib/api.mjs', import.meta.url))
-// без клиента тесты не падают, а помечаются пропущенными
+// without the client the tests are marked as skipped instead of failing
 const t = hasClient ? test : (title, fn) => test.skip(title, fn)
 /**
- * Присутствие по WebSocket: hello со сверкой epoch, кадр state по уведомлению,
- * вытеснение второго соединения. Проверяем настоящим сокетом, не моками.
+ * Presence over WebSocket: hello with an epoch check, the state frame on a
+ * notification, eviction of the second connection. We check with a real socket,
+ * not with mocks.
  */
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -60,7 +61,7 @@ after(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** Ждать кадр с нужным `t` (с таймаутом, чтобы тест не висел). */
+/** Wait for a frame with the given `t` (with a timeout so the test does not hang). */
 function frame (socket, type, ms = 2000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`не дождались кадра ${type}`)), ms)
@@ -94,7 +95,7 @@ function closed (socket, ms = 2000) {
   })
 }
 
-// Админка вызывается функциями: публичного админ-API больше нет.
+// The admin side is called through functions: there is no public admin API anymore.
 async function admin (path, options = {}) {
   const method = options.method ?? 'GET'
   const body = options.body ? JSON.parse(options.body) : {}
@@ -108,7 +109,7 @@ async function makeNode (name) {
 }
 
 
-t('без токена upgrade отвергается', async () => {
+t('upgrade without a token is rejected', async () => {
   await assert.rejects(async () => {
     const socket = new WebSocket(wsBase, ['чепуха-не-токен'])
     socket.on('error', () => {})
@@ -120,7 +121,7 @@ t('без токена upgrade отвергается', async () => {
   })
 })
 
-t('hello со старым epoch отвечает reconnect', async () => {
+t('hello with an old epoch answers reconnect', async () => {
   const { node, token } = await makeNode('lamp')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch - 1, known: 42 }))
@@ -130,7 +131,7 @@ t('hello со старым epoch отвечает reconnect', async () => {
   socket.close()
 })
 
-t('alive при отсутствии работы ставит ожидание, постановка команды будит узел', async () => {
+t('alive without work sets a wait, and queueing a command wakes the node', async () => {
   const { node, token } = await makeNode('nbw')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
@@ -151,7 +152,7 @@ t('alive при отсутствии работы ставит ожидание,
   socket.close()
 })
 
-t('второе соединение вытесняет первое кодом 4001', async () => {
+t('the second connection evicts the first with code 4001', async () => {
   const { token } = await makeNode('desktop')
   const first = await open(token)
   first.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
@@ -165,7 +166,7 @@ t('второе соединение вытесняет первое кодом 
   second.close()
 })
 
-t('присутствие считается онлайн для /v1/admin/nodes', async () => {
+t('presence counts as online for /v1/admin/nodes', async () => {
   const { token } = await makeNode('online-check')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
@@ -177,7 +178,7 @@ t('присутствие считается онлайн для /v1/admin/nodes
   socket.close()
 })
 
-t('отзыв токена рвёт открытую сессию', async () => {
+t('revoking the token tears down an open session', async () => {
   const { node, token } = await makeNode('revoke-ws')
   const socket = new WebSocket(wsBase, [token])
   await new Promise((resolve, reject) => {
@@ -195,21 +196,21 @@ t('отзыв токена рвёт открытую сессию', async () => 
   assert.equal(presence.online(node.id), false)
 })
 
-t('alive с отставшим номером получает state сразу, с актуальным — молчит', async () => {
+t('alive with a lagging number gets state at once, with the current one it stays silent', async () => {
   const { node, token } = await makeNode('sensor')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
   await frame(socket, 'hello-ok')
   queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
 
-  // клиент знает 0, у сервера уже 1 — ответ должен прийти сразу.
-  // Слушателя вешаем до отправки: на localhost ответ успевает раньше.
+  // the client knows 0 while the server already has 1 — the answer must come at once.
+  // We attach the listener before sending: on localhost the answer arrives first.
   const waitingState = frame(socket, 'state')
   socket.send(JSON.stringify({ t: 'alive', known: 0 }))
   const state = await waitingState
   assert.equal(state.max_commandno, 1, 'кадр несёт номер последней команды')
 
-  // теперь клиент в курсе — сервер молчит и запоминает ожидание
+  // now the client is up to date — the server stays silent and remembers the wait
   const maybeState = frame(socket, 'state')
   socket.send(JSON.stringify({ t: 'alive', known: 1 }))
   const silence = await Promise.race([
@@ -218,9 +219,9 @@ t('alive с отставшим номером получает state сразу,
   ])
   assert.equal(silence, 'тишина', 'на пустом приросте кадров быть не должно')
 
-  // а как только работа появилась — приходит сам
-  // ожидание уже стоит, значит новую работу сервер должен объявить сам —
-  // ровно так это делает плагин после постановки команды
+  // and as soon as work appears it arrives by itself
+  // the wait is already set, so the server has to announce new work itself —
+  // that is exactly what the plugin does after queueing a command
   const pushedState = frame(socket, 'state')
   queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
   presence.notify(node.id)
@@ -229,13 +230,13 @@ t('alive с отставшим номером получает state сразу,
   socket.close()
 })
 
-t('кадр уходит только ждущему: занятый узел не получает ничего', async () => {
+t('a frame goes only to the waiting one: a busy node gets nothing', async () => {
   const { node, token } = await makeNode('busy')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
   await frame(socket, 'hello-ok')
 
-  // узел НЕ говорил «жду»: новая работа не должна порождать кадр
+  // the node did NOT say it waits: new work must not produce a frame
   queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
   presence.notify(node.id)
   const silence = await Promise.race([
@@ -244,7 +245,7 @@ t('кадр уходит только ждущему: занятый узел н
   ])
   assert.equal(silence, 'тишина')
 
-  // сказал «жду» — и кадр приходит
+  // it said it waits — and the frame arrives
   const pushed = frame(socket, 'state')
   socket.send(JSON.stringify({ t: 'alive', known: 0 }))
   const state = await pushed
@@ -252,7 +253,7 @@ t('кадр уходит только ждущему: занятый узел н
   socket.close()
 })
 
-t('события изолированы: работа одному узлу не будит второго', async () => {
+t('events are isolated: work for one node does not wake the second one', async () => {
   const first = await makeNode('busy-one')
   const second = await makeNode('idle-one')
   const busy = await open(first.token)
@@ -262,15 +263,15 @@ t('события изолированы: работа одному узлу н�
   idle.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
   await frame(idle, 'hello-ok')
 
-  // оба сказали «жду»
+  // both said they wait
   const busyState = frame(busy, 'state')
   queue.enqueue({ nodeId: first.node.id, api: 1, method: 'exec', args: {} })
   busy.send(JSON.stringify({ t: 'alive', known: 0 }))
   await busyState
 
-  // работа появилась только у первого — второй должен молчать.
-  // Второму тоже надо сказать «жду», иначе проверка была бы пустой: он и так
-  // ничего не получил бы просто потому, что не заявлялся.
+  // work appeared only for the first one — the second must stay silent.
+  // The second one has to say it waits too, otherwise the check would be empty:
+  // it would get nothing anyway, just because it never announced itself.
   idle.send(JSON.stringify({ t: 'alive', known: 0 }))
   const idleFrame = frame(idle, 'state')
   queue.enqueue({ nodeId: first.node.id, api: 1, method: 'exec', args: {} })
@@ -281,7 +282,7 @@ t('события изолированы: работа одному узлу н�
   ])
   assert.equal(silence, 'тишина', 'чужой узел не должен получать кадр про работу первого')
 
-  // и наоборот: работа второму приходит второму
+  // and the other way round: work for the second one reaches the second one
   const secondState = frame(idle, 'state')
   queue.enqueue({ nodeId: second.node.id, api: 1, method: 'exec', args: {} })
   presence.notify(second.node.id)
@@ -291,13 +292,13 @@ t('события изолированы: работа одному узлу н�
   idle.close()
 })
 
-t('check_state с known: null закрывает выданные команды как node_restarted', async () => {
+t('check_state with known: null closes issued commands as node_restarted', async () => {
   const { node, token } = await makeNode('restarted')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
   await frame(socket, 'hello-ok')
 
-  // команда уже выдана узлу и «исполняется»
+  // the command was already issued to the node and is being executed
   const { promise } = queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: {} })
   queue.take(node.id, { limit: 5 })
 
@@ -311,7 +312,7 @@ t('check_state с known: null закрывает выданные команды
   socket.close()
 })
 
-t('старое имя кадра alive продолжает работать', async () => {
+t('the old frame name alive keeps working', async () => {
   const { node, token } = await makeNode('legacy')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
@@ -324,7 +325,7 @@ t('старое имя кадра alive продолжает работать', 
   socket.close()
 })
 
-t('сервер отвечает pong на прикладной ping с тем же id', async () => {
+t('the server answers pong to an application ping with the same id', async () => {
   const { node, token } = await makeNode('pingable')
   const socket = await open(token)
   socket.send(JSON.stringify({ t: 'hello', epoch: queue.epoch, known: 0 }))
@@ -336,9 +337,9 @@ t('сервер отвечает pong на прикладной ping с тем �
   socket.close()
 })
 
-t('approver=local по WebSocket не сбрасывается в none', async () => {
+t('approver=local over WebSocket is not reset to none', async () => {
   const { node, token } = await makeNode('approver-node')
-  // узел объявил session с методом approve
+  // the node announced session with the approve method
   store.announce(node.id, [
     { name: 'session', version: '6', methods: [{ method: 'approve', args: { type: 'object' } }] },
   ])

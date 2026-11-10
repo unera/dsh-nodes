@@ -1,5 +1,5 @@
 /**
- * Передача файлов по HTTP: разрешение даёт команда, путь берётся из неё.
+ * File transfer over HTTP: the permission comes from the command, the path is taken from it.
  */
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -18,7 +18,7 @@ after(() => rmSync(dir, { recursive: true, force: true }))
 
 const node = { id: 1, name: 'nbw' }
 
-test('без выданной команды передача запрещена', () => {
+test('transfer is forbidden without an issued command', () => {
   const queue = new Queue({ epoch: 1 })
   assert.throws(
     () => requireCommand({ queue, node, method: 'files.upload', seq: '7' }),
@@ -26,7 +26,7 @@ test('без выданной команды передача запрещена
   )
 })
 
-test('чужая команда не подходит: метод должен совпадать', () => {
+test('a foreign command does not fit: the method must match', () => {
   const queue = new Queue({ epoch: 1 })
   const { seq } = queue.enqueue({ nodeId: 1, api: 9, method: 'files.download', args: { path: '/tmp/x' }, timeout: 30 })
   assert.throws(
@@ -35,7 +35,7 @@ test('чужая команда не подходит: метод должен �
   )
 })
 
-test('загрузка: тело пишется в .inprogress, сверяется sha256 и режим', async () => {
+test('upload: the body goes to .inprogress, sha256 and mode are verified', async () => {
   const queue = new Queue({ epoch: 1 })
   const target = join(dir, 'uploaded.bin')
   const body = Buffer.from([0, 1, 2, 250, 251, 13, 10])
@@ -44,7 +44,7 @@ test('загрузка: тело пишется в .inprogress, сверяетс
     args: { path: target, size: body.length }, timeout: 30,
   })
   const command = requireCommand({ queue, node, method: 'files.upload', seq })
-  // тело отдаём потоком, как это делает http-сервер
+  // the body is passed as a stream, the way the http server does it
   const stream = Readable.from([body])
   const result = await receive({
     stream,
@@ -58,7 +58,7 @@ test('загрузка: тело пишется в .inprogress, сверяетс
   assert.deepEqual(readFileSync(target), body, 'байты должны совпасть')
 })
 
-test('размер из команды не совпал с content-length — отказ 412 и файла нет', async () => {
+test('the size from the command does not match content-length: 412 and no file', async () => {
   const queue = new Queue({ epoch: 1 })
   const target = join(dir, 'mismatch.bin')
   const { seq } = queue.enqueue({ nodeId: 1, api: 9, method: 'files.upload', args: { path: target, size: 99 }, timeout: 30 })
@@ -71,14 +71,14 @@ test('размер из команды не совпал с content-length — �
   assert.throws(() => readFileSync(target))
 })
 
-test('скачивание несуществующего файла — 404 с текстом', () => {
+test('downloading a missing file gives a 404 with text', () => {
   assert.throws(
     () => inspect(join(dir, 'нет-такого')),
     (error) => error.status === 404 && /скачивать нечего/.test(error.message),
   )
 })
 
-test('файл на месте: размер известен', () => {
+test('the file is there: its size is known', () => {
   const path = join(dir, 'present.txt')
   writeFileSync(path, 'hello')
   assert.equal(inspect(path).bytes, 5)

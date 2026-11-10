@@ -1,9 +1,10 @@
 /**
- * Режим песочницы из политики ядра и контракт с cordis.
+ * The sandbox mode from the core policy and the contract with cordis.
  *
- * Эти тесты появились после того, как выяснилось: сервис, не объявленный в
- * `inject`, бросает ошибку при обращении, а мы её глотали — и режим песочницы
- * не читался вообще. Проверяем и сами ответы, и объявление сервисов.
+ * These tests appeared after it turned out that a service not declared in
+ * `inject` throws on access, and we swallowed that error — so the sandbox mode
+ * was never read at all. We check both the answers themselves and the service
+ * declarations.
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -14,12 +15,12 @@ import { FALLBACK_MODE, modeFromPolicy } from '../lib/policy.mjs'
 
 const root = new URL('..', import.meta.url).pathname
 
-test('политика отдаёт режим и корень', () => {
+test('the policy returns the mode and the root', () => {
   const result = modeFromPolicy({ resolve: () => ({ mode: 'workspace-write', workspaceRoot: '/w' }) })
   assert.deepEqual(result, { mode: 'workspace-write', root: '/w' })
 })
 
-test('неизвестность — самый узкий режим, а не полный доступ', () => {
+test('the unknown case is the narrowest mode, not full access', () => {
   const warnings = []
   assert.deepEqual(modeFromPolicy(null, {}, (m) => warnings.push(m)), { mode: FALLBACK_MODE })
   assert.equal(FALLBACK_MODE, 'read-only')
@@ -33,12 +34,12 @@ test('неизвестность — самый узкий режим, а не �
   assert.equal(warnings.length, 3, 'о каждой проблеме надо сказать в журнал')
 })
 
-test('сервис без resolve тоже не роняет плагин', () => {
+test('a service without resolve does not crash the plugin either', () => {
   assert.deepEqual(modeFromPolicy({}, {}), { mode: 'read-only' })
 })
 
-test('все сервисы, к которым обращаемся напрямую, объявлены в inject', () => {
-  // комментарии не считаем: там сервисы упоминаются для объяснения
+test('every service we access directly is declared in inject', () => {
+  // comments are not counted: services are mentioned there for explanation
   const source = readFileSync(join(root, 'index.mjs'), 'utf8')
     .split('\n')
     .filter((line) => !line.trim().startsWith('//'))
@@ -48,14 +49,14 @@ test('все сервисы, к которым обращаемся напрям
   const names = [...declared.matchAll(/(\w+)\s*:/g)].map((match) => match[1])
   assert.ok(names.length > 0, 'inject должен быть картой сервисов')
 
-  // прямое обращение вида `ctx.<service>` требует объявления в inject.
-  // `ctx.get('...')` — не требует, поэтому такие обращения сюда не попадают.
+  // a direct access like `ctx.<service>` requires a declaration in inject.
+  // `ctx.get('...')` does not, so such accesses do not end up here.
   const used = new Set([...source.matchAll(/ctx\.(\w+)/g)].map((match) => match[1]))
   const notServices = new Set(['get', 'effect', 'logger', 'plugin', 'on', 'inject', 'emit', 'set'])
   const missing = [...used].filter((name) => !notServices.has(name) && !names.includes(name))
   assert.deepEqual(missing, [], `используются, но не объявлены в inject: ${missing.join(', ')}`)
 
-  // обратная проверка: тест должен ловить реальную дыру, а не быть зелёным всегда
+  // the reverse check: the test must catch a real hole instead of always being green
   const broken = source.replace(/\n\s*sandboxPolicy:\s*null,/, "\n")
   const brokenNames = [...(/export const inject = \{([^}]*)\}/.exec(broken)?.[1] ?? '').matchAll(/(\w+)\s*:/g)].map((m) => m[1])
   assert.ok(!brokenNames.includes('sandboxPolicy'), 'подготовка: из inject убрать sandboxPolicy не удалось')
