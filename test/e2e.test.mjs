@@ -357,8 +357,8 @@ t('revoking the token reopens the enrollment request', async () => {
   const id = created.body.node.id
   const token = created.body.token
 
-  // the node is alive
-  const alive = await api.state(base, token)
+  // the node is alive: an empty queue is the cheapest authenticated call
+  const alive = await api.commands(base, token, { limit: 1 })
   assert.equal(alive.status, 200)
 
   const revoked = await admin(`/nodes/${id}/token`, { method: 'POST', body: '' })
@@ -366,7 +366,7 @@ t('revoking the token reopens the enrollment request', async () => {
   assert.equal(revoked.body.revoked, true)
 
   // the old token is no longer accepted: the client gets an authorisation error
-  await assert.rejects(() => api.state(base, token), /token|unauthorized|токен/i)
+  await assert.rejects(() => api.commands(base, token, { limit: 1 }), /token|unauthorized|токен/i)
 })
 
 t('the command frame carries the session id', () => {
