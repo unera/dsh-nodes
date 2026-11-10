@@ -278,7 +278,13 @@ paths:
 
         Run independent commands of a batch in parallel if you like, but keep a
         cap (the reference client uses 5): one model turn can produce a dozen
-        calls, and a node must not be flooded. `session.chdir` must be applied
+        calls, and a node must not be flooded.
+
+        Do not wait for the whole batch before taking again. A cancellation is a
+        command too, and it sits in the queue behind the command it cancels: a
+        client that blocks on its batch never sees `#INTERNAL.CANCEL` issued
+        during a long command. Take no more than the free slots in one request
+        and come back for more as soon as a slot frees. `session.chdir` must be applied
         first and in order — it changes the session working directory, so the
         rest of the batch has to start in the new one. `session.approve` should
         run outside the pool: a dialog may hang for a day and must not hold a

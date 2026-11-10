@@ -46,6 +46,22 @@ A binding that does not check out refuses the whole announcement: the node never
 learns which rule fired, the server owns the rules and verifies every binding
 against the rest of the declaration.
 
+## A client must keep taking commands while it has free slots
+
+A cancellation is an ordinary command (`#INTERNAL.CANCEL`) and it sits in the
+queue **after** the command it cancels. So a client that takes a batch and then
+waits for the whole batch to finish cannot receive a cancellation issued while a
+long command is still running — the cancel waits in the queue until the command
+it was meant to stop has already finished.
+
+The contract: keep `K` slots for running commands (the reference client uses 5,
+configurable), never take more than the free slots in one batch, and go back for
+more as soon as a slot frees — without waiting for the rest of the batch. Then a
+cancellation reaches the node while there is still something to cancel.
+
+`session.approve` is the one exception: it leaves the pool entirely, because a
+dialog with a human may hang for a day.
+
 ## Control commands travel through the queue
 
 A control command is an ordinary queued command with:
