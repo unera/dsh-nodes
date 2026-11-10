@@ -97,8 +97,11 @@ x-protocol-rules:
   control-example: '#INTERNAL.CANCEL'
   control-ttl-seconds: 86400
   control-tolerates: [late delivery, duplicates, missing target]
-  control-namespace-rules: a method binds to a server-side rule through
-    `special`; the rule set is fixed and lives in spec/SPECIAL-RULES.md
+  rule-bindings: a node binds its methods to server-side rules in a separate
+    `applyRules` list, never inside the api def; the rule set is fixed and lives
+    in spec/SPECIAL-RULES.md
+  rule-errors: an unknown rule, an api or method the node does not declare, a
+    duplicate binding or an unknown option refuses the announcement (400)
   commands-are-tickets: transfer routes are authorised by the served command
   streams: written to <hostPath>.inprogress and renamed only after a success
     verdict; the path is computed by the server, never taken from the body
@@ -544,19 +547,6 @@ components:
         description:
           type: string
           description: one line for the model; shown in the catalog
-        special:
-          type: string
-          enum: [timing, flushBefore, flushAfter, flushAround]
-          description: |
-            Special rule the server applies to this method — the fixed set and the
-            contract of each rule live in `spec/SPECIAL-RULES.md`. A node only
-            binds a method to a rule here; it never learns which rule fired.
-
-            The binding is checked at announce time: an unknown rule is answered
-            with a warning and logged at error level, and a rule whose fields the
-            method does not declare is logged the same way. `timing` needs
-            `rttMs`, `clockSkewMs`, `durationMs` (filled by the server) plus
-            `startedAt` and `now` (filled by the node) in `returns`.
 
     ApiDef:
       type: object
@@ -583,6 +573,62 @@ components:
           type: array
           minItems: 1
           items: { $ref: "#/components/schemas/ApiDef" }
+        applyRules:
+          type: array
+          description: |
+            Bindings «a method of this node → a server-side rule». Optional, and
+            deliberately separate from `apis`: a rule says how *this machine*
+            executes a command, not what the API contract is, so an API def that
+            came from an outside source (an MCP server, say) never has to carry
+            server-only fields.
+
+            Everything here is checked against the rest of the announcement. An
+            unknown rule, an api this node does not hold, a method that api does
+            not declare, a duplicate binding or an unknown option refuses the
+            whole announcement with `400 apply-rules-invalid` — a binding that
+            silently does nothing is worse than a refusal. A rule that would
+            measure nothing (for instance `timing` without `retNames`) is accepted
+            with a warning.
+          items:
+            type: object
+            required: [api, method, rule]
+            properties:
+              api:
+                type: string
+                description: API name, as announced by this node
+              version:
+                type: string
+                description: |
+                  Optional narrowing: bind the rule to one contract version.
+                  Without it the rule applies to this api name on this node,
+                  whatever version it is running.
+              method:
+                type: string
+                description: method name inside that api
+              rule:
+                type: string
+                enum: [timing, flushBefore, flushAfter, flushAround]
+                description: |
+                  The fixed rule set and the contract of each rule live in
+                  `spec/SPECIAL-RULES.md`. The node binds and never learns which
+                  rule fired.
+              rulesOpts:
+                type: object
+                additionalProperties: false
+                description: options of the rule; every rule has its own
+                properties:
+                  retNames:
+                    type: object
+                    additionalProperties:
+                      type: [string, "null"]
+                    description: |
+                      For `timing`: canonical name → the field in the node's
+                      reply where the number is placed. `durationMs` is computed
+                      from the server's own stamps and needs nothing from the
+                      node; `clockSkewMs` needs the node's clock, which arrives
+                      in the `now` field of the result envelope. A canonical name
+                      left out (or set to null) is not placed anywhere: measuring
+                      into nowhere is allowed, inventing a field name is not.
         proto: { type: integer }
         clientVersion: { type: string }
         access:

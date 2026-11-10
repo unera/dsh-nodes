@@ -171,16 +171,17 @@ test('клиент не может объявить служебный мето�
 
 test('правило flushAround доезжает до очереди барьерами', async () => {
   const { node } = store.createNode({ name: 'flush-node', access: 'danger-full-access' })
-  // `special` объявляет узел, а барьеры ставит сервер: клиент о FLUSH не думает
   store.announce(node.id, [{
     name: 'session',
     version: '9',
     methods: [
-      { method: 'chdir', args: { type: 'object' }, special: 'flushAround' },
+      { method: 'chdir', args: { type: 'object' } },
       { method: 'cwd', args: { type: 'object' } },
     ],
   }])
   const api = { id: store.nodeApis(node.id)[0] }
+  // правило приходит отдельным списком: в apidef его нет
+  store.setNodeRules(node.id, [{ apiId: api.id, method: 'chdir', rule: 'flushAround' }])
 
   const sent = []
   const spyQueue = {
@@ -202,64 +203,57 @@ test('правило flushAround доезжает до очереди барье
   const chdir = sent.find((command) => command.method === 'chdir')
   assert.equal(chdir.flushBefore, true, 'chdir обязан дождаться пула до себя')
   assert.equal(chdir.flushAfter, true, 'и не пускать за собой ничего, пока не применится')
+  assert.equal(chdir.rule, 'flushAround')
   const cwd = sent.find((command) => command.method === 'cwd')
-  assert.equal(cwd.flushBefore, false, 'метод без правила барьеров не просит')
+  assert.equal(cwd.flushBefore, false, 'метод без привязки барьеров не просит')
   assert.equal(cwd.flushAfter, false)
+  assert.equal(cwd.rule, null)
 })
 
-test('правило метода читается из сохранённого объявления', async () => {
-  const { ruleFor, flushPhases } = await import('../lib/special-rules.mjs')
-  const def = { methods: [{ method: 'exec' }, { method: 'chdir', special: 'flushAfter' }] }
-  assert.equal(ruleFor(def, 'exec'), null)
-  assert.equal(ruleFor(def, 'chdir'), 'flushAfter')
-  assert.equal(ruleFor(def, 'nope'), null)
-  assert.deepEqual(flushPhases('flushAfter'), { before: false, after: true })
-  assert.deepEqual(flushPhases('flushAround'), { before: true, after: true })
-  assert.equal(flushPhases('timing'), null, 'замер — не барьер')
-  assert.equal(flushPhases(null), null)
+test('правило живёт на узле, а не в объявлении API', () => {
+  const { node } = store.createNode({ name: 'rule-node' })
+  store.announce(node.id, [{ name: 'session', version: '1', methods: [{ method: 'ping', args: { type: 'object' } }] }])
+  const apiId = store.nodeApis(node.id)[0]
+  assert.equal(store.nodeRule(node.id, apiId, 'ping'), null, 'без привязки правила нет')
+  store.setNodeRules(node.id, [{ apiId, method: 'ping', rule: 'timing', opts: { retNames: { durationMs: 'took' } } }])
+  assert.deepEqual(store.nodeRule(node.id, apiId, 'ping'), { rule: 'timing', opts: { retNames: { durationMs: 'took' } } })
+  // привязка заменяется целиком: старая не должна уцелеть
+  store.setNodeRules(node.id, [{ apiId, method: 'ping', rule: 'flushBefore' }])
+  assert.deepEqual(store.nodeRule(node.id, apiId, 'ping'), { rule: 'flushBefore', opts: null })
 })
 
-test('правило timing: сервер сам считает замер по отметкам узла', async () => {
-  const { annotateTiming } = await import('../lib/tools.mjs')
-  const startedAt = 1_000_000
-  const takenAt = startedAt + 50 // сервер выдал команду на 50 мс позже отметки узла
-  const outcome = {
+function timingOutcome ({ startedAt = 1000, finishedAt = 1250.5, nodeNow = 5000.25 } = {}) {
+  return {
     status: 'ok',
-    code: null,
-    message: null,
-    timing: { issuedAt: takenAt - 10, takenAt },
-    results: [{
-      type: 'text',
-      text: JSON.stringify({
-        startedAt,
-        now: startedAt + 700,
-        rttMs: null,
-        clockSkewMs: null,
-        durationMs: null,
-      }),
-    }],
+    internal: { rule: 'timing', ruleState: { startedAt, finishedAt }, nodeNow },
+    results: [{ type: 'text', text: JSON.stringify({ pong: 1 }) }],
   }
-  const filled = annotateTiming(outcome, {})
+}
+
+test('правило timing: длительность считает сервер, смещение — по часам узла', async () => {
+  const { annotateTiming } = await import('../lib/tools.mjs')
+  const filled = annotateTiming(timingOutcome(), { opts: { retNames: { durationMs: 'took', clockSkewMs: 'skew' } } })
   const payload = JSON.parse(filled.results[0].text)
-  // часы узла отстают на 50 мс: значение отрицательное, и это нормально
-  assert.equal(payload.clockSkewMs, -50, 'разница часов снимается в момент выдачи')
-  assert.equal(payload.durationMs, 700, 'работа узла — по его собственным часам')
-  assert.equal(typeof payload.rttMs, 'number', 'round trip считает сервер')
-  assert.ok(payload.rttMs >= 0)
+  assert.equal(payload.took, 250.5, 'длительность — по отметкам сервера, узел тут не нужен')
+  assert.equal(payload.skew, 3749.75, 'смещение — часы узла минус момент ответа')
+  assert.equal(payload.pong, 1, 'остальное в ответе не трогаем')
+  assert.equal('startedAt' in payload, false, 'внутренние отметки правила наружу не идут')
+  assert.equal('finishedAt' in payload, false)
 })
 
-test('правило timing: узел не прислал метки — громкий лог, а не выдуманные числа', async () => {
+test('правило timing: нет часов узла — смещение не выдумывается', async () => {
   const { annotateTiming } = await import('../lib/tools.mjs')
-  const logged = []
-  const outcome = {
-    status: 'ok',
-    timing: { issuedAt: 1, takenAt: 2 },
-    results: [{ type: 'text', text: JSON.stringify({ rttMs: null }) }],
-  }
-  const same = annotateTiming(outcome, { log: (level, event, details) => logged.push({ level, event, details }) })
-  assert.deepEqual(same, outcome, 'исход не переписывается, если мерить нечем')
-  assert.equal(logged.length, 1)
-  assert.equal(logged[0].level, 'error')
-  assert.equal(logged[0].event, 'special-rule-violated')
-  assert.equal(logged[0].details.rule, 'timing')
+  const outcome = timingOutcome({ nodeNow: null })
+  const filled = annotateTiming(outcome, { opts: { retNames: { durationMs: 'took', clockSkewMs: 'skew' } } })
+  const payload = JSON.parse(filled.results[0].text)
+  assert.equal(payload.took, 250.5, 'длительность считается всегда')
+  assert.equal('skew' in payload, false, 'без часов узла смещение не вычисляется')
 })
+
+test('правило timing: пустой retNames — считаем и никуда не кладём', async () => {
+  const { annotateTiming } = await import('../lib/tools.mjs')
+  const outcome = timingOutcome()
+  assert.deepEqual(annotateTiming(outcome, { opts: null }).results, outcome.results)
+  // остаток от правила (internal) наружу всё равно не уходит — это делает nodes_call
+})
+

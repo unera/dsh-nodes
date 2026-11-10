@@ -57,6 +57,16 @@ after(() => {
 })
 
 // Админка больше не живёт на публичном префиксе: операции вызываются функциями.
+/** Объявление, которое вправе отказать: ловим отказ как отказ, а не как падение. */
+async function announceExpectingError (token, apis, options) {
+  try {
+    const ok = await api.announce(base, token, apis, options)
+    return { status: ok.status, body: ok.body }
+  } catch (error) {
+    return { status: error.status, body: { code: error.code, message: error.message } }
+  }
+}
+
 async function admin (path, options = {}) {
   const method = options.method ?? 'GET'
   const body = options.body ? JSON.parse(options.body) : {}
@@ -677,9 +687,11 @@ t('исход повтора после подтверждения тоже по
   const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'audit-retry' }) })
   const nodeId = created.body.node.id
   const token = created.body.token
+  // версии уникальны для теста: одна и та же пара (name, version) с другой
+  // схемой у другого узла теперь отказ, и это отдельный тест
   const announced = store.announce(nodeId, [
-    { name: 'bash', version: '2', methods: [{ method: 'exec', args: { type: 'object' } }] },
-    { name: 'session', version: '4', methods: [{ method: 'approve', args: { type: 'object' } }] },
+    { name: 'bash', version: 'audit-2', methods: [{ method: 'exec', args: { type: 'object' } }] },
+    { name: 'session', version: 'audit-4', methods: [{ method: 'approve', args: { type: 'object' } }] },
   ])
   const bashApi = announced.apis[0]
   store.updateNode(nodeId, { allow_escalation: 1, access: 'danger-full-access' })
@@ -1064,4 +1076,66 @@ t('словари панели полны во всех трёх языках', 
     const missing = keys.filter((key) => !(key in dict))
     assert.deepEqual(missing, [], `${name}: нет строк ${missing.join(', ')}`)
   }
+})
+
+t('applyRules: мусор в привязке отказывает всему объявлению', async () => {
+  const created = await admin('/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ name: 'rules-bad' }) })
+  assert.equal(created.status, 201)
+  const token = created.body.token
+  const apis = [{ name: 'lampx', version: '1', methods: [{ method: 'set', args: { type: 'object' } }] }]
+
+  // правило на метод, которого api не объявляет — это опечатка, а не «пропустим»
+  const badMethod = await announceExpectingError(token, apis, {
+    applyRules: [{ api: 'lampx', method: 'nope', rule: 'timing' }],
+  })
+  assert.equal(badMethod.status, 400)
+  assert.equal(badMethod.body.code, 'apply-rules-invalid')
+  assert.match(badMethod.body.message, /не объявляет метод/)
+
+  const badRule = await announceExpectingError(token, apis, {
+    applyRules: [{ api: 'lampx', method: 'set', rule: 'timing-ish' }],
+  })
+  assert.equal(badRule.status, 400)
+  assert.match(badRule.body.message, /неизвестно/)
+})
+
+t('applyRules: привязка живёт у узла, а не в объявлении API', async () => {
+  const created = await admin('/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ name: 'rules-ok' }) })
+  const token = created.body.token
+  const nodeId = created.body.node.id
+  const apis = [{ name: 'lampy', version: '1', methods: [{ method: 'set', args: { type: 'object' } }] }]
+
+  const announced = await api.announce(base, token, apis, {
+    applyRules: [{ api: 'lampy', method: 'set', rule: 'timing', rulesOpts: { retNames: { durationMs: 'took' } } }],
+  })
+  assert.equal(announced.status, 200)
+  const apiId = store.nodeApis(nodeId)[0]
+  assert.deepEqual(store.nodeRule(nodeId, apiId, 'set'), { rule: 'timing', opts: { retNames: { durationMs: 'took' } } })
+  // и в apidef служебных полей нет: контракт остался чистым
+  const def = store.api(apiId)
+  assert.equal(Object.prototype.hasOwnProperty.call(def.methods[0], 'special'), false)
+})
+
+t('одна и та же пара (name, version) с разными методами — отказ объявлению', async () => {
+  const a = await admin('/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ name: 'conflict-a' }) })
+  const b = await admin('/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ name: 'conflict-b' }) })
+  const first = await api.announce(base, a.body.token, [{
+    name: 'sharedapi', version: '1', methods: [{ method: 'a', args: { type: 'object' } }],
+  }])
+  assert.equal(first.status, 200)
+
+  // второй узел с той же парой и другими методами: сервер взял бы схему
+  // первого, а второй исполнял бы команды по чужому контракту
+  const conflict = await announceExpectingError(b.body.token, [{
+    name: 'sharedapi', version: '1', methods: [{ method: 'b', args: { type: 'object' } }],
+  }])
+  assert.equal(conflict.status, 400)
+  assert.equal(conflict.body.code, 'apidef-conflict')
+  assert.match(conflict.body.message, /поднимите версию/)
+
+  // поднятая версия — другой контракт, и это законно
+  const versioned = await api.announce(base, b.body.token, [{
+    name: 'sharedapi', version: '2', methods: [{ method: 'b', args: { type: 'object' } }],
+  }])
+  assert.equal(versioned.status, 200)
 })

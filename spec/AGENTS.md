@@ -34,10 +34,17 @@ Reserved names live in a separate namespace (`internal`), not in a node's API.
 
 Some methods need the server to do more than pass them through: measure their
 time, or make sure nothing else runs around them. The fixed set of such rules
-and the contract each one imposes live in `spec/SPECIAL-RULES.md`. The node only
-declares which method wants which rule — the `special` field of that method in
-`announce` — and never learns which rule fired; the server owns the rules and
-checks the declaration against them.
+and the contract each one imposes live in `spec/SPECIAL-RULES.md`.
+
+A node binds its methods to rules in a separate `applyRules` list of `announce`,
+keyed by api name (and optionally version) plus method — never inside the api
+def. The reason is ownership: a rule says how this machine executes a command,
+not what the contract is, and a def that came from an outside source (an MCP
+server) must not have to carry server-only fields.
+
+A binding that does not check out refuses the whole announcement: the node never
+learns which rule fired, the server owns the rules and verifies every binding
+against the rest of the declaration.
 
 ## Control commands travel through the queue
 

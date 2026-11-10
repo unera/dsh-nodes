@@ -367,19 +367,6 @@ components:
           type: object
           description: JSON-схема аргументов; по ней сервер проверяет `data`
         description: { type: string }
-        special:
-          type: string
-          enum: [timing, flushBefore, flushAfter, flushAround]
-          description: |
-            Особое правило, которое сервер применяет к методу. Набор правил и их
-            контракты — в `spec/SPECIAL-RULES.md`; узел только привязывает метод
-            к правилу и о срабатывании ничего не узнаёт.
-
-            Привязка проверяется на announce: неизвестное правило возвращается
-            предупреждением и пишется в журнал как ошибка, а правило, чьих полей
-            нет в объявлении ответа, логируется так же. Для `timing` нужны
-            `rttMs`, `clockSkewMs`, `durationMs` (их заполняет сервер) и
-            `startedAt`, `now` (их заполняет узел) в `returns`.
 
     ApiDef:
       type: object
@@ -406,6 +393,55 @@ components:
           type: array
           minItems: 1
           items: { $ref: "#/components/schemas/ApiDef" }
+        applyRules:
+          type: array
+          description: |
+            Привязки «метод этого узла → правило сервера». Поле отдельное и
+            необязательное: правило говорит, как **эта машина** исполняет
+            команду, а не каков контракт API, поэтому объявление, пришедшее из
+            внешнего источника (MCP), не обязано нести служебные поля.
+
+            Всё здесь сверяется с остальным объявлением: неизвестное правило,
+            api, которого у узла нет, метод, которого api не объявляет, дубль
+            привязки или неизвестная опция — отказ всему объявлению с
+            `400 apply-rules-invalid`. Привязка, которая тихо ничего не делает,
+            хуже отказа. Правило, которому нечего мерить (`timing` без
+            `retNames`), принимается с предупреждением.
+          items:
+            type: object
+            required: [api, method, rule]
+            properties:
+              api: { type: string, description: имя API из объявления }
+              version:
+                type: string
+                description: |
+                  Необязательное уточнение: привязать правило к одной версии
+                  контракта. Без него правило действует на это имя API у этого
+                  узла независимо от версии.
+              method: { type: string }
+              rule:
+                type: string
+                enum: [timing, flushBefore, flushAfter, flushAround]
+                description: |
+                  Набор правил фиксирован, контракты — в
+                  `spec/SPECIAL-RULES.md`. Узел привязывает и о срабатывании не
+                  узнаёт.
+              rulesOpts:
+                type: object
+                additionalProperties: false
+                properties:
+                  retNames:
+                    type: object
+                    additionalProperties:
+                      type: [string, "null"]
+                    description: |
+                      Для `timing`: канонное имя → поле в ответе узла, куда
+                      положить число. `durationMs` сервер считает по своим
+                      отметкам, узел для него не нужен; `clockSkewMs` требует
+                      часов узла — они приходят полем `now` в конверте
+                      результата. Канонное имя, которого нет в отображении (или
+                      оно null), никуда не кладётся: мерить «в стол» можно,
+                      придумывать имя поля за узла — нет.
         proto: { type: integer }
         clientVersion: { type: string }
         access:

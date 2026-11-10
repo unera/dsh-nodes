@@ -85,51 +85,71 @@ test('соглашения протокола описаны в схеме', () 
   assert.match(spec, /INTERNAL\.CANCEL/)
 })
 
-test('особые правила требуют полей в объявлении метода', async () => {
-  const { checkSpecialRules, RULES } = await import('../lib/special-rules.mjs')
-  // timing без полей замера — это «замер», который ничего не мерил
-  const bad = checkSpecialRules([{
-    name: 'session',
-    methods: [{ method: 'ping', special: 'timing', returns: { type: 'object', properties: {} } }],
-  }])
-  // три поля, которые ставит сервер, и две отметки узла: каждое отсутствующее — жалоба
-  const fields = [...RULES.timing.fields, ...RULES.timing.nodeFields]
-  assert.equal(bad.problems.length, fields.length)
-  for (const field of fields) assert.match(bad.problems.join(' '), new RegExp(field))
+test('applyRules проверяет привязку и отказывает объявлению целиком', async () => {
+  const { parseApplyRules } = await import('../lib/special-rules.mjs')
+  const defs = {
+    session: { id: 7, def: { name: 'session', version: 'v1', methods: [{ method: 'ping' }, { method: 'chdir' }] } },
+    shell: { id: 8, def: { name: 'shell', version: 'v1', methods: [{ method: 'exec' }] } },
+  }
+  const resolve = (name) => defs[name] ?? null
 
-  const good = checkSpecialRules([{
-    name: 'session',
-    methods: [{
-      method: 'ping',
-      special: 'timing',
-      returns: { type: 'object', properties: Object.fromEntries(fields.map((field) => [field, {}])) },
-    }],
-  }])
-  assert.deepEqual(good.problems, [])
+  const ok = parseApplyRules([{ api: 'session', method: 'chdir', rule: 'flushAround' }], { resolve })
+  assert.deepEqual(ok.errors, [])
+  assert.deepEqual(ok.bindings, [{ apiId: 7, method: 'chdir', rule: 'flushAround', opts: null }])
+  assert.deepEqual(ok.warnings, [])
 
-  // правило, которого у сервера нет, — тоже повод сказать вслух
-  const unknown = checkSpecialRules([{ name: 'session', methods: [{ method: 'x', special: 'nope' }] }])
-  assert.equal(unknown.unknownRules.length, 1)
+  // всё, что не сходится, — отказ, а не тихий пропуск
+  const unknownRule = parseApplyRules([{ api: 'session', method: 'chdir', rule: 'nope' }], { resolve })
+  assert.match(unknownRule.errors[0], /неизвестно/)
+  const unknownApi = parseApplyRules([{ api: 'files', method: 'exec', rule: 'timing' }], { resolve })
+  assert.match(unknownApi.errors[0], /не объявлен/)
+  const unknownMethod = parseApplyRules([{ api: 'session', method: 'nope', rule: 'timing' }], { resolve })
+  assert.match(unknownMethod.errors[0], /не объявляет метод/)
+  const duplicate = parseApplyRules([
+    { api: 'session', method: 'chdir', rule: 'flushBefore' },
+    { api: 'session', method: 'chdir', rule: 'flushAfter' },
+  ], { resolve })
+  assert.match(duplicate.errors[0], /уже задано/)
+  const badOption = parseApplyRules([{
+    api: 'session', method: 'ping', rule: 'timing', rulesOpts: { retNames: { nope: 'x' } },
+  }], { resolve })
+  assert.match(badOption.errors[0], /не считает/)
+  const badRuleOption = parseApplyRules([{
+    api: 'session', method: 'ping', rule: 'timing', rulesOpts: { mystery: 1 },
+  }], { resolve })
+  assert.match(badRuleOption.errors[0], /неизвестные опции/)
+  const reserved = parseApplyRules([{ api: 'session', method: '#INTERNAL.FLUSH', rule: 'timing' }], { resolve })
+  assert.match(reserved.errors[0], /служебное имя/)
+})
+
+test('timing без retNames принимается, но предупреждает: мерить в стол можно, терять — нет', async () => {
+  const { parseApplyRules } = await import('../lib/special-rules.mjs')
+  const resolve = () => ({ id: 1, def: { name: 'session', version: 'v1', methods: [{ method: 'ping' }] } })
+  const result = parseApplyRules([{ api: 'session', method: 'ping', rule: 'timing' }], { resolve })
+  assert.deepEqual(result.errors, [])
+  assert.equal(result.warnings.length, 1)
+  assert.match(result.warnings[0], /retNames пуст/)
+  assert.equal(result.bindings[0].opts, null)
+
+  // null в retNames — «этого поля нет, не кладём», и это уже осознанный выбор
+  const withNull = parseApplyRules([{
+    api: 'session', method: 'ping', rule: 'timing', rulesOpts: { retNames: { durationMs: 'took', clockSkewMs: null } },
+  }], { resolve })
+  assert.deepEqual(withNull.warnings, [])
+  assert.deepEqual(withNull.bindings[0].opts, { retNames: { durationMs: 'took' } })
 })
 
 test('привязка метода к правилу описана в схеме announce', () => {
-  // без этого поля в схеме узел не знает, как попросить правило, а сервер —
-  // что именно он принимает в объявлении
-  assert.match(spec, /special:/, 'в MethodDef должно быть поле special')
-  const methodDef = spec.slice(spec.indexOf('    MethodDef:'), spec.indexOf('    ApiDef:'))
-  assert.match(methodDef, /enum: \[timing, flushBefore, flushAfter, flushAround\]/,
+  // правила объявляются отдельным списком, а не полем внутри apidef: внешний
+  // источник контракта не должен знать про серверные правила
+  assert.match(spec, /applyRules:/, 'в Announce должно быть поле applyRules')
+  const announce = spec.slice(spec.indexOf('    Announce:'), spec.indexOf('    AnnounceAccepted:'))
+  assert.match(announce, /enum: \[timing, flushBefore, flushAfter, flushAround\]/,
     'перечисление правил в схеме должно совпадать с набором сервера')
   assert.match(spec, /SPECIAL-RULES\.md/, 'схема должна ссылаться на реестр правил')
-  // русская документация протокола не должна отставать от английской
-  assert.match(read('docs/openapi.ru.yaml'), /special:/)
+  const methodDef = spec.slice(spec.indexOf('    MethodDef:'), spec.indexOf('    ApiDef:'))
+  assert.equal(/special:/.test(methodDef), false, 'правил внутри apidef быть не должно')
+  assert.match(read('docs/openapi.ru.yaml'), /applyRules:/, 'русская схема не должна отставать')
 })
 
-test('правило-барьер полей не требует, а неизвестное правило — повод сказать вслух', async () => {
-  const { checkSpecialRules } = await import('../lib/special-rules.mjs')
-  const ok = checkSpecialRules([{ name: 'shell', methods: [{ method: 'exec', special: 'flushBefore' }] }])
-  assert.deepEqual(ok.problems, [], 'flushBefore полей в ответе не требует')
-  assert.deepEqual(ok.unknownRules, [])
-  const unknown = checkSpecialRules([{ name: 'shell', methods: [{ method: 'exec', special: 'timing-ish' }] }])
-  assert.equal(unknown.unknownRules.length, 1, 'правило, которого у сервера нет, не применяется молча')
-  assert.match(unknown.unknownRules[0], /неизвестно/)
-})
+

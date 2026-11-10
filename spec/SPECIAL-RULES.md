@@ -1,53 +1,69 @@
 # Special rules for node commands
 
-A node declares, in `announce`, which of its methods want special treatment.
+A node says, in `announce`, which of its methods want special treatment — in a
+separate `applyRules` list, **not** inside the api def:
+
+```json
+"applyRules": [
+  { "api": "session", "method": "chdir", "rule": "flushAround" },
+  { "api": "session", "method": "ping", "rule": "timing",
+    "rulesOpts": { "retNames": { "durationMs": "durationMs", "clockSkewMs": "skewMs" } } }
+]
+```
+
+Why separate: a rule says how **this machine** executes a command, not what the
+API contract is. Two nodes may hold the same contract and treat it differently,
+and an api def that arrived from an outside source (an MCP server, say) must not
+have to carry server-only fields.
+
 The set of rules lives on the server and grows only with code — a node cannot
 invent one. This file is the registry: keep it in sync with the server.
 
-If a node declares a rule the server does not know, the command runs as usual
-and the node gets a warning in the announce response. Silence is not allowed
-here: a "special" command that nobody treats specially is how quiet bugs start.
+## A binding is checked, not trusted
 
-## Rules impose requirements on the declaring API
+A rule is only as good as what it can rely on, and a binding that quietly does
+nothing is worse than a refusal. So the server checks every entry against the
+announcement and refuses the whole announce (`400 apply-rules-invalid`) when:
 
-A rule is only as good as the contract it needs. `timing` is meaningless if the
-method does not expose the fields the server fills, so the server checks each
-declaration at announce time and:
+- the rule is unknown;
+- the `api` is not one this node holds, or `version` names one it does not hold;
+- the `api` does not declare `method`;
+- the same `(api, method)` is bound twice;
+- `rulesOpts` carries an option the rule does not have, or a canonical name the
+  rule does not compute.
 
-- logs `special-rule-violated` at **error** level and adds a warning to the
-  announce response when a required field is missing;
-- logs `special-rule-unknown` at error level when the node names a rule the
-  server does not have.
+A rule that would measure nothing — `timing` without `retNames` — is accepted
+with a warning: measuring into nowhere is a legitimate choice, losing the
+measurement by accident is not.
 
-Loud is the point: a rule applied to a method that cannot honour it produces
-numbers that look real and mean nothing.
+Rules impose **no** requirements on the api def. The binding carries what the
+rule needs, which is why an outside source can announce a contract without
+knowing that rules exist.
+
+## The rule set
 
 ## The rule set
 
 ### `timing` — measure how long the command took
 
-The server stamps the moment it hands the command out, and on the answer it
-computes three numbers.
+The rule is a wrapper and it relies on itself first. Two numbers, two different
+sources:
 
-The contract has two halves:
+| number | where it comes from |
+| --- | --- |
+| `durationMs` | the server's own stamps: `startedAt` when the command is handed out, `finishedAt` when the answer arrives. The node is not involved at all — it may send nothing |
+| `clockSkewMs` | needs the node's clock: how far ahead of the server's it is. No clock in the answer — no skew, and none is invented |
 
-- **the node reports two stamps of its own clock** — `startedAt` (when it began
-  the work) and `now` (when it finished). It cannot compute the measurements
-  itself: it does not know the clock difference between the machines, and any
-  number invented without it would look real and mean nothing;
-- **the node leaves the three measured fields empty** — `rttMs`,
-  `clockSkewMs`, `durationMs`. The server fills them:
+`startedAt` and `finishedAt` live in the rule's own state inside the command and
+never appear in the answer.
 
-  | field | meaning |
-  | --- | --- |
-  | `rttMs` | from handing the command out to the answer, on the server's clock |
-  | `clockSkewMs` | how far the node's clock is ahead of the server's, sampled at hand-out — network and work excluded |
-  | `durationMs` | how long the node worked, on its own clock |
+Where the numbers go is decided by `rulesOpts.retNames`: canonical name → field
+in the node's reply. A canonical name left out (or set to `null`) is not placed
+anywhere — so a method whose reply has no such field simply keeps its own shape.
 
-Both halves are requirements, not advice: a declaration that does not carry the
-five fields is refused loudly at announce time, and an answer without the two
-stamps is logged as `special-rule-violated` and left unfilled rather than
-quietly faked.
+The node's clock arrives in the result envelope as `now` — one field for every
+command, not per rule. The rule reads it only when it needs skew; when it does
+not, `now` costs nobody anything.
 
 Why this is not called `ping`: any command may ask to be measured — a backup
 run, a health probe, a status read. `ping` is just the first user of the rule.
@@ -84,3 +100,7 @@ and nothing may start while it is applied.
 Nothing about rules appears in the client's dispatch: it sees `#INTERNAL.FLUSH`
 as an ordinary command with the special name, waits for the pool to drain, and
 answers. All knowledge about which method wants which rule stays on the server.
+
+The one thing every client does unconditionally is stamp its own clock into the
+result envelope (`now`). That is not rule-awareness: it is a plain fact about the
+answer, and the rule reads it only if it needs it.
