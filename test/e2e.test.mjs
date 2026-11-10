@@ -169,7 +169,7 @@ t('таймаут снимает команду и отдаёт timeout ожид
   // таймаут не просто снимает команду: узлу кладётся управляющая отмена,
   // чтобы процесс на нём не жил после того, как сервер перестал ждать
   const queued = queue.take(node.id, { limit: 10 }).commands ?? []
-  const cancel = queued.find((command) => command.method === 'CANCEL')
+  const cancel = queued.find((command) => command.method === '#INTERNAL.CANCEL')
   assert.ok(cancel, 'должна быть выдана отмена')
   assert.equal(cancel.args.reason, 'timeout')
   assert.equal(cancel.args.seq, seq, 'отмена ссылается на ту самую команду')
@@ -185,7 +185,7 @@ t('валидация аргументов отвечает до постано�
   assert.throws(() => checkArgs(def, 'nope', { command: 'true' }), /unknown method "nope"/)
   assert.equal(checkArgs(def, 'exec', { command: 'echo 1' }).method, 'exec')
 
-  const work = (queue.take(node.id, { limit: 100 }).commands ?? []).filter((command) => command.method !== 'CANCEL')
+  const work = (queue.take(node.id, { limit: 100 }).commands ?? []).filter((command) => command.method !== '#INTERNAL.CANCEL')
   assert.equal(work.length, 0, 'отказ не должен порождать рабочую команду')
 })
 

@@ -146,11 +146,25 @@ test('управляющая команда: без ожидания, с сут�
   const { CONTROL_API } = await import('../lib/queue.mjs')
   const created = store.createNode({ name: 'ctrl-node' })
   const nodeId = created.node.id
-  const seq = queue.control(nodeId, 'CANCEL', { seq: 7, reason: 'timeout' })
+  const seq = queue.control(nodeId, '#INTERNAL.CANCEL', { seq: 7, reason: 'timeout' })
   assert.ok(seq, 'команда должна получить номер')
   const issued = queue.issued(nodeId, seq)
   assert.equal(issued.api, CONTROL_API, 'служебные команды идут под псевдо-API -1')
-  assert.equal(issued.method, 'CANCEL')
+  assert.equal(issued.method, '#INTERNAL.CANCEL')
   assert.deepEqual(issued.args, { seq: 7, reason: 'timeout' })
   assert.equal(issued.timeout, 86_400, 'сутки, а не обычный таймаут')
+})
+
+test('клиент не может объявить служебный метод с решёткой', () => {
+  const created = store.createNode({ name: 'reserved-node' })
+  const answer = store.announce(created.node.id, [{
+    name: 'shell',
+    version: 'x',
+    methods: [{ method: '#INTERNAL.CANCEL', args: { type: 'object' } }, { method: 'exec', args: { type: 'object' } }],
+  }])
+  const def = store.api(answer.apis[0])
+  const names = (def.methods ?? []).map((m) => m.method)
+  assert.ok(!names.includes('#INTERNAL.CANCEL'), 'служебное имя не должно попасть в объявление')
+  assert.ok(names.includes('exec'), 'обычные методы остаются')
+  assert.match(answer.warnings.join(' '), /зарезервированы/)
 })
