@@ -161,10 +161,16 @@ t('поздний результат — 409, чужой номер — 404', as
 t('таймаут снимает команду и отдаёт timeout ожидающему', async () => {
   const node = store.nodes()[0]
   const apiId = store.nodeApis(node.id)[0]
-  const { promise } = queue.enqueue({ nodeId: node.id, api: apiId, method: 'exec', args: { command: 'sleep 30' }, timeout: 0.05 })
+  const { promise, seq } = queue.enqueue({ nodeId: node.id, api: apiId, method: 'exec', args: { command: 'sleep 30' }, timeout: 0.05 })
   const outcome = await promise
   assert.equal(outcome.status, 'timeout')
-  assert.equal(queue.info(node.id).queued, 0)
+  // таймаут не просто снимает команду: узлу кладётся управляющая отмена,
+  // чтобы процесс на нём не жил после того, как сервер перестал ждать
+  const queued = queue.take(node.id, { limit: 10 }).commands ?? []
+  const cancel = queued.find((command) => command.method === 'CANCEL')
+  assert.ok(cancel, 'должна быть выдана отмена')
+  assert.equal(cancel.args.reason, 'timeout')
+  assert.equal(cancel.args.seq, seq, 'отмена ссылается на ту самую команду')
 })
 
 t('валидация аргументов отвечает до постановки в очередь', () => {
@@ -177,8 +183,8 @@ t('валидация аргументов отвечает до постано�
   assert.throws(() => checkArgs(def, 'nope', { command: 'true' }), /unknown method "nope"/)
   assert.equal(checkArgs(def, 'exec', { command: 'echo 1' }).method, 'exec')
 
-  const before = queue.info(node.id).queued
-  assert.equal(before, 0) // отказ не должен порождать команду
+  const work = (queue.take(node.id, { limit: 100 }).commands ?? []).filter((command) => command.method !== 'CANCEL')
+  assert.equal(work.length, 0, 'отказ не должен порождать рабочую команду')
 })
 
 t('заявка на регистрацию: pending → approve → токен один раз', async () => {
