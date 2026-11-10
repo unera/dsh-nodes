@@ -367,6 +367,19 @@ components:
           type: object
           description: JSON-схема аргументов; по ней сервер проверяет `data`
         description: { type: string }
+        special:
+          type: string
+          enum: [timing, flushBefore, flushAfter, flushAround]
+          description: |
+            Особое правило, которое сервер применяет к методу. Набор правил и их
+            контракты — в `spec/SPECIAL-RULES.md`; узел только привязывает метод
+            к правилу и о срабатывании ничего не узнаёт.
+
+            Привязка проверяется на announce: неизвестное правило возвращается
+            предупреждением и пишется в журнал как ошибка, а правило, чьих полей
+            нет в объявлении ответа, логируется так же. Для `timing` нужны
+            `rttMs`, `clockSkewMs`, `durationMs` (их заполняет сервер) и
+            `startedAt`, `now` (их заполняет узел) в `returns`.
 
     ApiDef:
       type: object

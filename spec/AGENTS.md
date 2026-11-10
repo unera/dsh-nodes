@@ -35,7 +35,9 @@ Reserved names live in a separate namespace (`internal`), not in a node's API.
 Some methods need the server to do more than pass them through: measure their
 time, or make sure nothing else runs around them. The fixed set of such rules
 and the contract each one imposes live in `spec/SPECIAL-RULES.md`. The node only
-declares which method wants which rule; the server owns the rules.
+declares which method wants which rule — the `special` field of that method in
+`announce` — and never learns which rule fired; the server owns the rules and
+checks the declaration against them.
 
 ## Control commands travel through the queue
 

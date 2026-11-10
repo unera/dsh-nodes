@@ -97,6 +97,8 @@ x-protocol-rules:
   control-example: '#INTERNAL.CANCEL'
   control-ttl-seconds: 86400
   control-tolerates: [late delivery, duplicates, missing target]
+  control-namespace-rules: a method binds to a server-side rule through
+    `special`; the rule set is fixed and lives in spec/SPECIAL-RULES.md
   commands-are-tickets: transfer routes are authorised by the served command
   streams: written to <hostPath>.inprogress and renamed only after a success
     verdict; the path is computed by the server, never taken from the body
@@ -542,6 +544,19 @@ components:
         description:
           type: string
           description: one line for the model; shown in the catalog
+        special:
+          type: string
+          enum: [timing, flushBefore, flushAfter, flushAround]
+          description: |
+            Special rule the server applies to this method — the fixed set and the
+            contract of each rule live in `spec/SPECIAL-RULES.md`. A node only
+            binds a method to a rule here; it never learns which rule fired.
+
+            The binding is checked at announce time: an unknown rule is answered
+            with a warning and logged at error level, and a rule whose fields the
+            method does not declare is logged the same way. `timing` needs
+            `rttMs`, `clockSkewMs`, `durationMs` (filled by the server) plus
+            `startedAt` and `now` (filled by the node) in `returns`.
 
     ApiDef:
       type: object

@@ -27,12 +27,27 @@ numbers that look real and mean nothing.
 ### `timing` — measure how long the command took
 
 The server stamps the moment it hands the command out, and on the answer it
-computes `rttMs`, `clockSkewMs` and `durationMs`.
+computes three numbers.
 
-The contract: the command **must leave the timing fields empty in its reply** —
-the server fills them. The node reports `now` (its own clock) and does not fill
-anything else. If the node pre-fills them, the number stops meaning anything,
-so "leave them empty" is a requirement, not advice.
+The contract has two halves:
+
+- **the node reports two stamps of its own clock** — `startedAt` (when it began
+  the work) and `now` (when it finished). It cannot compute the measurements
+  itself: it does not know the clock difference between the machines, and any
+  number invented without it would look real and mean nothing;
+- **the node leaves the three measured fields empty** — `rttMs`,
+  `clockSkewMs`, `durationMs`. The server fills them:
+
+  | field | meaning |
+  | --- | --- |
+  | `rttMs` | from handing the command out to the answer, on the server's clock |
+  | `clockSkewMs` | how far the node's clock is ahead of the server's, sampled at hand-out — network and work excluded |
+  | `durationMs` | how long the node worked, on its own clock |
+
+Both halves are requirements, not advice: a declaration that does not carry the
+five fields is refused loudly at announce time, and an answer without the two
+stamps is logged as `special-rule-violated` and left unfilled rather than
+quietly faked.
 
 Why this is not called `ping`: any command may ask to be measured — a backup
 run, a health probe, a status read. `ping` is just the first user of the rule.

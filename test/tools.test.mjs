@@ -218,3 +218,48 @@ test('правило метода читается из сохранённого
   assert.equal(flushPhases('timing'), null, 'замер — не барьер')
   assert.equal(flushPhases(null), null)
 })
+
+test('правило timing: сервер сам считает замер по отметкам узла', async () => {
+  const { annotateTiming } = await import('../lib/tools.mjs')
+  const startedAt = 1_000_000
+  const takenAt = startedAt + 50 // сервер выдал команду на 50 мс позже отметки узла
+  const outcome = {
+    status: 'ok',
+    code: null,
+    message: null,
+    timing: { issuedAt: takenAt - 10, takenAt },
+    results: [{
+      type: 'text',
+      text: JSON.stringify({
+        startedAt,
+        now: startedAt + 700,
+        rttMs: null,
+        clockSkewMs: null,
+        durationMs: null,
+      }),
+    }],
+  }
+  const filled = annotateTiming(outcome, {})
+  const payload = JSON.parse(filled.results[0].text)
+  // часы узла отстают на 50 мс: значение отрицательное, и это нормально
+  assert.equal(payload.clockSkewMs, -50, 'разница часов снимается в момент выдачи')
+  assert.equal(payload.durationMs, 700, 'работа узла — по его собственным часам')
+  assert.equal(typeof payload.rttMs, 'number', 'round trip считает сервер')
+  assert.ok(payload.rttMs >= 0)
+})
+
+test('правило timing: узел не прислал метки — громкий лог, а не выдуманные числа', async () => {
+  const { annotateTiming } = await import('../lib/tools.mjs')
+  const logged = []
+  const outcome = {
+    status: 'ok',
+    timing: { issuedAt: 1, takenAt: 2 },
+    results: [{ type: 'text', text: JSON.stringify({ rttMs: null }) }],
+  }
+  const same = annotateTiming(outcome, { log: (level, event, details) => logged.push({ level, event, details }) })
+  assert.deepEqual(same, outcome, 'исход не переписывается, если мерить нечем')
+  assert.equal(logged.length, 1)
+  assert.equal(logged[0].level, 'error')
+  assert.equal(logged[0].event, 'special-rule-violated')
+  assert.equal(logged[0].details.rule, 'timing')
+})

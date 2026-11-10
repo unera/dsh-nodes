@@ -204,6 +204,9 @@ export function apply (ctx, config) {
   const tools = createTools({
     store,
     queue,
+    // громкий канал: правило, применённое к команде, которая его не выполнила,
+    // должно быть видно в журнале, а не в догадках
+    log,
     notify: (nodeId) => presence?.notify(nodeId),
     config,
     epoch,
