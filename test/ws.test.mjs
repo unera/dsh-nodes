@@ -461,3 +461,135 @@ t('approver=local survives over announce: presence fields live there now', async
   assert.equal(store.node(node.id).approver, 'local', 'обещание должно сохраниться')
   assert.equal(store.node(node.id).access, 'workspace-write')
 })
+
+/** The node row as it lies on disk: a refusal must not move a single field. */
+function nodeSnapshot (id) {
+  // `last_seen` is authentication (`authNode` touches the node), not the announcement
+  const { last_seen: _seen, ...rest } = store.node(id)
+  return rest
+}
+
+t('announce with invalid applyRules writes nothing: the node stays exactly as it was', async () => {
+  const { node, token } = await makeAnnouncedNode('rules-refused', {
+    client_epoch: 2, access: 'rw', base: 'rw', approver: 'server', workdir: '/srv/work', platform: 'desktop',
+  })
+  const before = nodeSnapshot(node.id)
+  const apisBefore = store.nodeApis(node.id)
+  const rulesBefore = store.nodeRules(node.id)
+
+  const answer = await announce(token, {
+    client_epoch: 3,
+    access: 'full',
+    base: 'full',
+    approver: 'local',
+    workdir: '/elsewhere',
+    platform: 'android',
+    applyRules: [{ api: 'bash', method: 'exec', rule: 'nope' }],
+  })
+  assert.equal(answer.status, 400)
+  assert.equal(answer.body.code, 'apply-rules-invalid')
+  assert.deepEqual(nodeSnapshot(node.id), before, 'отказ по правилам не должен трогать поля узла')
+  assert.deepEqual(store.nodeApis(node.id), apisBefore, 'apis остаются прежними')
+  assert.deepEqual(store.nodeRules(node.id), rulesBefore, 'биндинги остаются прежними')
+})
+
+t('announce with a conflicting contract is refused and writes nothing', async () => {
+  // the first node owns the contract `bash@1`: whoever comes second with other methods is refused
+  await makeAnnouncedNode('conflict-owner')
+  const other = await makeNode('conflict-other')
+  const before = nodeSnapshot(other.node.id)
+
+  const answer = await announce(other.token, {
+    client_epoch: 2,
+    access: 'full',
+    platform: 'android',
+    apis: [{
+      name: 'bash',
+      version: '1',
+      methods: [{ method: 'exec', args: { type: 'object' }, description: 'другой контракт' }],
+    }],
+  })
+  assert.equal(answer.status, 400)
+  assert.equal(answer.body.code, 'apidef-conflict')
+  assert.match(answer.body.message, /поднимите версию контракта/)
+  assert.deepEqual(nodeSnapshot(other.node.id), before, 'конфликт контракта не должен трогать поля узла')
+  assert.deepEqual(store.nodeApis(other.node.id), [], 'apis не появляются при отказе')
+
+  // the same contract is not a conflict: the node just joins the existing declaration
+  const same = await announce(other.token, { client_epoch: 3 })
+  assert.equal(same.status, 200)
+  assert.equal(store.nodeApis(other.node.id).length, 1)
+})
+
+t('announce with a malformed api shape is refused before anything is written', async () => {
+  const { node, token } = await makeNode('broken-shape')
+  const before = nodeSnapshot(node.id)
+  const cases = [
+    { apis: 'bash' },
+    { apis: [{ name: '   ', version: '1', methods: [{ method: 'exec', args: { type: 'object' } }] }] },
+    { apis: [{ name: 'bash', version: 1, methods: [{ method: 'exec', args: { type: 'object' } }] }] },
+    { apis: [{ name: 'bash', version: '1', methods: [] }] },
+    { apis: [{ name: 'bash', version: '1', methods: ['exec'] }] },
+    { apis: [{ name: 'bash', version: '1', methods: [{ method: 'exec' }] }] },
+  ]
+  for (const body of cases) {
+    const answer = await announce(token, { client_epoch: 5, access: 'full', platform: 'android', ...body })
+    assert.equal(answer.status, 400, `должно отказать: ${JSON.stringify(body)}`)
+    assert.equal(answer.body.code, 'bad_request')
+    assert.deepEqual(nodeSnapshot(node.id), before, `форма проверяется до записи: ${JSON.stringify(body)}`)
+  }
+  assert.deepEqual(store.nodeApis(node.id), [], 'apis не появляются при отказе')
+})
+
+t('a successful announce writes the node fields, the apis and the rules together', async () => {
+  const { node, token } = await makeNode('atomic-ok')
+  const answer = await announce(token, {
+    client_epoch: 7,
+    access: 'full',
+    base: 'rw',
+    approver: 'local',
+    workdir: '/home/user/project',
+    platform: 'android',
+    applyRules: [{ api: 'bash', method: 'exec', rule: 'timing', rulesOpts: { retNames: { durationMs: 'took' } } }],
+  })
+  assert.equal(answer.status, 200, JSON.stringify(answer.body))
+
+  const row = store.node(node.id)
+  assert.equal(row.access, 'danger-full-access')
+  assert.equal(row.base, 'rw')
+  assert.equal(row.approver, 'local')
+  assert.equal(row.workdir, '/home/user/project')
+  assert.equal(row.platform, 'android')
+  assert.equal(row.client_epoch, 7)
+  assert.equal(row.client_version, 'test-1')
+  assert.ok(Number.isInteger(row.boot_at), 'аптайм переводится в наше время на объявлении')
+
+  const apis = store.nodeApis(node.id)
+  assert.equal(apis.length, 1, 'apis записываются той же транзакцией')
+  assert.deepEqual(store.nodeRules(node.id), [
+    { api: apis[0], method: 'exec', rule: 'timing', opts: { retNames: { durationMs: 'took' } } },
+  ], 'биндинги пишутся вместе с полями и apis')
+})
+
+t('platform shows up in the admin node list and survives an announce without it', async () => {
+  const { node, token } = await makeAnnouncedNode('platform-node', { platform: 'android' })
+  const listed = await admin('/nodes')
+  const view = listed.body.nodes.find((item) => item.id === node.id)
+  assert.equal(view.platform, 'android', 'платформа видна в админке рядом с версией клиента')
+
+  // an older client knows nothing about the field: silence keeps the value it does not send
+  const again = await http('PUT', '/v1/announce', token, { apis: BASH, clientVersion: 'test-1', access: 'rw' })
+  assert.equal(again.status, 200)
+  assert.equal(store.node(node.id).platform, 'android', 'объявление без platform не обнуляет прежнее значение')
+
+  // a broken value is not a reason to refuse the announcement, only to ignore the value
+  for (const platform of ['   ', 'x'.repeat(33), 42]) {
+    const broken = await announce(token, { platform })
+    assert.equal(broken.status, 200, `косметическое поле не отказывает объявлению: ${JSON.stringify(platform)}`)
+    assert.equal(store.node(node.id).platform, 'android')
+  }
+
+  const trimmed = await announce(token, { platform: '  desktop  ' })
+  assert.equal(trimmed.status, 200)
+  assert.equal(store.node(node.id).platform, 'desktop', 'значение обрезается по пробелам')
+})

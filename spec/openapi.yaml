@@ -771,6 +771,16 @@ components:
             can be recognised by a lower number (`409 client-epoch-stale`) even
             after the server itself restarted.
         clientVersion: { type: string }
+        platform:
+          type: string
+          maxLength: 32
+          description: |
+            What the client runs on: `desktop`, `android`. Stored on the node and
+            shown in the admin panel; the client version usually carries the same
+            prefix, but this field is the statement itself. Cosmetic: a value that
+            is not a non-empty string of at most 32 characters after trimming is
+            ignored instead of refusing the announcement, and an announcement
+            without the field keeps the value the node told earlier.
         access:
           type: string
           enum: [ro, rw, full]
