@@ -32,6 +32,10 @@ Reserved names live in a separate namespace (`internal`), not in a node's API.
 
 ## Special rules
 
+How a client must drive work — two channels, the fetch loop, ping and reconnect —
+lives in `spec/CLIENT-LOOP.md`. That file is the reference for the behaviour under
+load, not for the wire format.
+
 Some methods need the server to do more than pass them through: measure their
 time, or make sure nothing else runs around them. The fixed set of such rules
 and the contract each one imposes live in `spec/SPECIAL-RULES.md`.
