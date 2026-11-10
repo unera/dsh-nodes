@@ -195,3 +195,26 @@ test('take и info называют номер max_commandno', () => {
   assert.equal(taken.max_commandno, 2, 'номер выдаётся вместе с пачкой: клиенту не надо ничего считать')
   assert.equal(taken.commands.length, 1)
 })
+
+test('аборт закрывает висящий вопрос человеку, а не только процессы', () => {
+  const queue = new Queue({ epoch: 1 })
+  const { seq } = queue.enqueue({
+    nodeId: 1, api: -1, method: '#INTERNAL.APPROVE', args: { id: 'x', text: 't' }, timeout: 86400, priority: 5,
+  })
+  assert.equal(queue.take(1).commands[0].seq, seq, 'вопрос ушёл на узел')
+  assert.equal(queue.cancel(1, seq), true)
+
+  const next = queue.take(1, { limit: 5 }).commands
+  assert.equal(next.length, 1)
+  assert.equal(next[0].method, '#INTERNAL.CANCEL', 'узел должен получить просьбу закрыть вопрос')
+  assert.equal(next[0].args.seq, seq)
+})
+
+test('сама отмена себя не отменяет: рекурсии нет', () => {
+  const queue = new Queue({ epoch: 1 })
+  const seq = queue.control(1, '#INTERNAL.CANCEL', { seq: 1, reason: 'timeout' })
+  queue.take(1)               // отмена ушла на узел и висит
+  const before = queue.info(1).queued
+  queue.cancel(1, seq)
+  assert.equal(queue.info(1).queued, before - 1, 'команда снята и второй отмены не породила')
+})
