@@ -8,6 +8,20 @@ If a node declares a rule the server does not know, the command runs as usual
 and the node gets a warning in the announce response. Silence is not allowed
 here: a "special" command that nobody treats specially is how quiet bugs start.
 
+## Rules impose requirements on the declaring API
+
+A rule is only as good as the contract it needs. `timing` is meaningless if the
+method does not expose the fields the server fills, so the server checks each
+declaration at announce time and:
+
+- logs `special-rule-violated` at **error** level and adds a warning to the
+  announce response when a required field is missing;
+- logs `special-rule-unknown` at error level when the node names a rule the
+  server does not have.
+
+Loud is the point: a rule applied to a method that cannot honour it produces
+numbers that look real and mean nothing.
+
 ## The rule set
 
 ### `timing` — measure how long the command took

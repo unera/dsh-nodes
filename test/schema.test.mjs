@@ -84,3 +84,26 @@ test('соглашения протокола описаны в схеме', () 
   assert.match(spec, /control-api:\s*-1/)
   assert.match(spec, /INTERNAL\.CANCEL/)
 })
+
+test('особые правила требуют полей в объявлении метода', async () => {
+  const { checkSpecialRules } = await import('../lib/special-rules.mjs')
+  // timing без полей замера — это «замер», который ничего не мерил
+  const bad = checkSpecialRules([{
+    name: 'session',
+    methods: [{ method: 'ping', special: 'timing', returns: { type: 'object', properties: {} } }],
+  }])
+  // правило требует два поля: каждое отсутствующее — отдельная жалоба
+  assert.equal(bad.problems.length, 2)
+  assert.match(bad.problems.join(' '), /sentAt/)
+  assert.match(bad.problems.join(' '), /receivedAt/)
+
+  const good = checkSpecialRules([{
+    name: 'session',
+    methods: [{ method: 'ping', special: 'timing', returns: { type: 'object', properties: { sentAt: {}, receivedAt: {} } } }],
+  }])
+  assert.deepEqual(good.problems, [])
+
+  // правило, которого у сервера нет, — тоже повод сказать вслух
+  const unknown = checkSpecialRules([{ name: 'session', methods: [{ method: 'x', special: 'nope' }] }])
+  assert.equal(unknown.unknownRules.length, 1)
+})
