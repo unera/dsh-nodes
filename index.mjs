@@ -17,6 +17,7 @@ const require = createRequire(import.meta.url)
 import { Store, newToken } from './lib/db.mjs'
 import { Queue } from './lib/queue.mjs'
 import { createNodesServer } from './lib/server.mjs'
+import { createConnStats } from './lib/conn-stats.mjs'
 import { ArgsError, checkArgs } from './lib/args.mjs'
 import { createPresence } from './lib/ws.mjs'
 import { renderAdmin } from './lib/admin.mjs'
@@ -87,7 +88,10 @@ export function apply (ctx, config) {
   let store = null
   let queue = null
   let presence = null
-  mountAdminRoutes({ ctx, config, getDeps: () => ({ store, queue, config, prefix: config.routePrefix, presence }) })
+  // live counters of the current connection: one instance for the socket, the HTTP side
+  // and the admin panel, otherwise the panel would show numbers nobody increments
+  const connStats = createConnStats()
+  mountAdminRoutes({ ctx, config, getDeps: () => ({ store, queue, config, prefix: config.routePrefix, presence, connStats }) })
 
   const dir = resolveDataDir(config)
   mkdirSync(dir, { recursive: true })
@@ -136,7 +140,7 @@ export function apply (ctx, config) {
     // `ws` — CommonJS, и берём его синхронно: `apply` не должен быть async,
     // иначе cordis уводит выполнение в чужое волокно и регистрации не видно.
     const { WebSocketServer } = require('ws')
-    presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log, pingSeconds: config.wsPingSeconds ?? 0 })
+    presence = createPresence({ WebSocketServer, prefix: config.routePrefix, store, queue, log, pingSeconds: config.wsPingSeconds ?? 0, connStats })
   } catch (error) {
     log('warn', `WebSocket недоступен (${error.message}); присутствие только по HTTP`)
   }
@@ -151,7 +155,7 @@ export function apply (ctx, config) {
   queue.setControlLog?.((nodeId, method, args, outcome) => {
     log('warn', 'control-failed', { node: nodeId, method, args, code: outcome?.code ?? null })
   })
-  const server = createNodesServer({ store, queue, config, log, presence, services })
+  const server = createNodesServer({ store, queue, config, log, presence, services, connStats })
 
   const disposers = []
   const register = (route) => {
