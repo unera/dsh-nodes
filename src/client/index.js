@@ -389,6 +389,49 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
   ])
 }
 
+/**
+ * Известные типы кадров: их показываем первыми, остальные — после них под своим
+ * именем. Именно неизвестный тип и стоит увидеть: он означает расхождение
+ * протокола, а не «ещё один обычный кадр».
+ */
+const KNOWN_FRAMES_IN = ['state', 'ping']
+const KNOWN_FRAMES_OUT = ['state', 'pong']
+
+/** Счётчики кадров одного направления: тип и число, без новых классов. */
+function frameCells (counts, known) {
+  const raw = counts && typeof counts === 'object' ? counts : {}
+  const keys = Object.keys(raw).filter((key) => raw[key])
+  if (!keys.length) return h('span', { key: 'z', className: 'muted' }, '0')
+  const order = known.filter((key) => keys.includes(key))
+    .concat(keys.filter((key) => !known.includes(key)).sort())
+  return h('div', { key: 'f', className: 'chips' }, order.map((key) =>
+    h('span', { key, className: 'chip' }, `${key} ${raw[key]}`)))
+}
+
+/**
+ * Строка таблицы соединений: что узел делает прямо сейчас.
+ *
+ * Числа живые и обнуляются вместе с поколением, поэтому `clientEpoch` стоит
+ * рядом: без него счётчики не к чему привязать.
+ */
+function ConnRow ({ node }) {
+  const conn = node.conn ?? {}
+  const online = pillOnline(node)
+  return h('tr', null, [
+    h('td', { key: 'n' }, [
+      h('div', { key: 'name' }, node.name),
+      h('div', { key: 'id', className: 'aliases' }, h('code', null, node.id)),
+    ]),
+    h('td', { key: 'on' }, h('span', { key: 'p', className: `pill ${online ? 'on' : 'off'}` }, online ? t('pill.online') : t('pill.offline'))),
+    h('td', { key: 'e' }, node.clientEpoch == null
+      ? h('span', { key: 'z', className: 'muted' }, '—')
+      : h('code', { key: 'v' }, String(node.clientEpoch))),
+    h('td', { key: 'c' }, String(conn.commands ?? 0)),
+    h('td', { key: 'i' }, frameCells(conn.in, KNOWN_FRAMES_IN)),
+    h('td', { key: 'o' }, frameCells(conn.out, KNOWN_FRAMES_OUT)),
+  ])
+}
+
 /** Секция целиком. */
 function NodesPanel () {
   const [nodes, setNodes] = useState([])
@@ -519,12 +562,14 @@ function NodesPanel () {
     h('div', { key: 'msg', className: `msg ${message.kind}` },
       message.text || (epoch != null ? t('summary.epoch', { epoch, count: nodes.length }) : '')),
     // Панель разбита на вкладки: подключения — то, с чего начинают, аудит —
-    // то, куда смотрят редко, настройки — то, что меняют один раз.
+    // то, куда смотрят редко, настройки — то, что меняют один раз, счётчики
+    // соединений — то, на что смотрят, когда «узел вроде на связи, но молчит».
     h('div', { key: 'tabs', className: 'tabs' }, [
       tabButton('connections', t('tab.connections')),
       tabButton('api', t('tab.api')),
       tabButton('audit', t('tab.audit')),
       tabButton('settings', t('tab.settings')),
+      tabButton('conn', t('tab.conn')),
     ]),
 
     h('section', { key: 'pair', style: only('connections') }, [
@@ -746,6 +791,26 @@ function NodesPanel () {
         : h('div', { className: 'muted' }, t('settings.failed')),
       h('div', { key: 'selfnote', className: 'muted', style: { marginTop: 8 } },
         t('settings.selfNote')),
+    ]),
+
+    // Живые счётчики того же списка узлов: отдельного запроса нет — данные уже
+    // пришли с /nodes, и обновляются они тем же таймером раз в 5 секунд.
+    h('section', { key: 'conn', style: only('conn') }, [
+      h('h3', { key: 'h' }, t('conn.title')),
+      h('div', { key: 'note', className: 'muted', style: { fontSize: 12, marginBottom: 6 } }, t('conn.note')),
+      nodes.length === 0
+        ? h('div', { key: 'e', className: 'empty' }, t('conn.empty'))
+        : h('table', { key: 't' }, [
+          h('thead', { key: 'head' }, h('tr', null, [
+            h('th', { key: 'n' }, t('conn.node')),
+            h('th', { key: 'o' }, t('conn.online')),
+            h('th', { key: 'e' }, t('conn.epoch')),
+            h('th', { key: 'c' }, t('conn.commands')),
+            h('th', { key: 'i' }, t('conn.in')),
+            h('th', { key: 'out' }, t('conn.out')),
+          ])),
+          h('tbody', { key: 'body' }, nodes.map((node) => h(ConnRow, { key: `conn-${node.id}`, node }))),
+        ]),
     ]),
   ])
 }
