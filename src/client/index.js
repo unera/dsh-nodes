@@ -414,6 +414,18 @@ function frameCells (counts, known) {
  * Числа живые и обнуляются вместе с поколением, поэтому `clientEpoch` стоит
  * рядом: без него счётчики не к чему привязать.
  */
+/** How long this connection has been counting: since is set when the counters started. */
+function connAge (since) {
+  const started = Number(since)
+  if (!Number.isFinite(started) || started <= 0) return '—'
+  const seconds = Math.max(0, Math.round((Date.now() - started) / 1000))
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h > 0) return `${h} h ${m} min`
+  if (m > 0) return `${m} min`
+  return `${seconds} s`
+}
+
 function ConnRow ({ node }) {
   const conn = node.conn ?? {}
   const online = pillOnline(node)
@@ -426,6 +438,7 @@ function ConnRow ({ node }) {
     h('td', { key: 'e' }, node.clientEpoch == null
       ? h('span', { key: 'z', className: 'muted' }, '—')
       : h('code', { key: 'v' }, String(node.clientEpoch))),
+    h('td', { key: 'a' }, connAge(conn.since)),
     h('td', { key: 'c' }, String(conn.commands ?? 0)),
     h('td', { key: 'i' }, frameCells(conn.in, KNOWN_FRAMES_IN)),
     h('td', { key: 'o' }, frameCells(conn.out, KNOWN_FRAMES_OUT)),
@@ -805,6 +818,7 @@ function NodesPanel () {
             h('th', { key: 'n' }, t('conn.node')),
             h('th', { key: 'o' }, t('conn.online')),
             h('th', { key: 'e' }, t('conn.epoch')),
+            h('th', { key: 'a' }, t('conn.age')),
             h('th', { key: 'c' }, t('conn.commands')),
             h('th', { key: 'i' }, t('conn.in')),
             h('th', { key: 'out' }, t('conn.out')),
