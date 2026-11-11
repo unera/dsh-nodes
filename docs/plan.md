@@ -465,7 +465,8 @@ const { status, message, results } = await enqueue(nodeId, apiNo, method, args, 
 | `data` больше `maxArgsBytes` | `{status:'error', message:'args too large: 48 KiB > 16 KiB'}` — узел не тревожим |
 | `results` от узла больше `maxResultBytes` | `{status:'error', message:'result too large: …'}` — узел об этом узнаёт по `413` |
 | очередь узла на потолке | `{status:'error', message:'queue_full: у узла 100 незакрытых команд'}` — номер `state` при этом **не расходуется** |
-| тело запроса больше `maxBodyBytes` | `413`, код `body_too_large` |
+| JSON-тело больше `maxBodyBytes` | `413`, код `body_too_large` |
+| передача больше `maxTransferBytes` | `413`, код `too_big`: до записи для объявленной длины, обрыв потока на ходу |
 
 Таймер снимается на любом исходе; поздний `POST /result` на закрытую команду
 получает `409` и пишется в лог.
@@ -945,7 +946,8 @@ ip, first_seen, last_seen, status, node, token_sha256_handed_at)`.
 | `maxQueuePerNode` | 100 | потолок очереди; дальше `queue_full` (считаются незакрытые) |
 | `maxArgsBytes` | 16384 | размер `data` в постановке; больше — отказ до очереди |
 | `maxResultBytes` | 262144 | размер `results` от узла; больше — `413` и ошибка модели |
-| `maxBodyBytes` | 1048576 | тело любого запроса к нашему префиксу; больше — `413` |
+| `maxBodyBytes` | 1048576 | JSON-тело запроса (announce, результаты, админка); больше — `413`; на потоковые передачи не действует |
+| `maxTransferBytes` | 536870912 | потолок одной передачи файла; объявленная длина больше — `413` до записи, поток — обрыв на ходу |
 | `aliveTimeoutSeconds` | 60 | сколько без `alive` считать живым |
 | `safetyPollSeconds` | 30 | период страховочного опроса |
 | `autoEscalate` | `true` | спрашивать ли человека при отказе песочницы (§13.3) |

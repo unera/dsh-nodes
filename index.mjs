@@ -53,7 +53,12 @@ export const Config = z.object({
   commandTtl: z.natural().default(300).description('Сколько секунд невыданная команда ещё живёт'),
   maxBatch: z.natural().default(5).description('Сколько команд отдаётся за один запрос'),
   maxQueuePerNode: z.natural().default(100).description('Потолок незакрытых команд на узел'),
-  maxBodyBytes: z.natural().default(1048576).description('Потолок тела запроса'),
+  // Only a JSON body is capped by this: announce, results, admin calls. A file transfer is
+  // a stream — it goes to a file and is bounded by maxTransferBytes, never by this number.
+  maxBodyBytes: z.natural().default(1048576).description('Потолок JSON-тела запроса (announce, результаты, админка); потоковые передачи файлов им не ограничены'),
+  // The one knob for a transfer, whatever way it goes: a declared length is refused before
+  // anything is written, a chunked stream is cut off as soon as it crosses the limit.
+  maxTransferBytes: z.natural().default(536870912).description('Потолок одной передачи файла (upload-file/download-file), байт; на JSON-тело не влияет'),
   aliveTimeoutSeconds: z.natural().default(60).description('Сколько без обращений считать узел живым'),
   // Пинг по сокету включён по умолчанию: без него полумёртвое соединение
   // (сеть пропала, а TCP никто не закрыл) висит в присутствии как живое, и
