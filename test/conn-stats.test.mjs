@@ -41,9 +41,11 @@ test('the counters count frames and commands per node', () => {
   stats.bumpCommands(1)
   stats.bumpCommands(1)
   stats.bumpCommands(1)
+  stats.bumpResults(1)
 
   const snap = stats.snapshot(1)
-  assert.equal(snap.commands, 3)
+  assert.equal(snap.commands, 3, 'три запроса commands')
+  assert.equal(snap.results, 1, 'один принятый результат: пара 1/3 и есть то, что видно на панели')
   assert.deepEqual({ ...snap.in }, { state: 2, ping: 1 })
   assert.deepEqual({ ...snap.out }, { state: 1, pong: 1 })
   assert.ok(snap.since > 0, 'у счётчиков есть момент, с которого они считают')
@@ -191,6 +193,19 @@ test('frames really land in the counters the admin JSON reports', async () => {
   const again = admin('/nodes').body.nodes.find((entry) => entry.id === node.id)
   assert.deepEqual(again.conn, row.conn, 'перезагрузка страницы не меняет счётчики')
   socket.close()
+})
+
+test('a result the node hands back is counted next to the requests', async () => {
+  const { node, token } = await makeNode('conn-results', { client_epoch: 9 })
+  const issued = queue.enqueue({ nodeId: node.id, api: 1, method: 'exec', args: { command: 'true' }, timeout: 5 })
+  const taken = await http('GET', `/v1/commands?epoch=${queue.epoch}&client_epoch=9`, token)
+  assert.equal(taken.body.commands.length, 1, 'узел забрал работу')
+  const posted = await http('POST', `/v1/commands/${issued.seq}/result`, token, { ok: true, results: [] })
+  assert.equal(posted.status, 200)
+
+  const row = admin('/nodes').body.nodes.find((entry) => entry.id === node.id)
+  assert.equal(row.conn.commands, 1, 'один запрос работы')
+  assert.equal(row.conn.results, 1, 'и один результат: 1/1 — это работа, а не опрос')
 })
 
 test('an announced client_epoch resets the counters of that node', async () => {

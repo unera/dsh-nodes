@@ -429,6 +429,10 @@ function connAge (since) {
 function ConnRow ({ node }) {
   const conn = node.conn ?? {}
   const online = pillOnline(node)
+  // results/requests: one number cannot tell an idle node from a busy one, while the pair
+  // says it at once — twenty requests and two results are eighteen empty answers
+  const results = Number(conn.results ?? 0)
+  const asked = Number(conn.commands ?? 0)
   return h('tr', null, [
     h('td', { key: 'n' }, [
       h('div', { key: 'name' }, node.name),
@@ -439,7 +443,8 @@ function ConnRow ({ node }) {
       ? h('span', { key: 'z', className: 'muted' }, '—')
       : h('code', { key: 'v' }, String(node.clientEpoch))),
     h('td', { key: 'a' }, connAge(conn.since)),
-    h('td', { key: 'c' }, String(conn.commands ?? 0)),
+    h('td', { key: 'c', title: t('conn.commandsHint', { done: results, asked }) },
+      h('code', { key: 'v' }, `${results}/${asked}`)),
     h('td', { key: 'i' }, frameCells(conn.in, KNOWN_FRAMES_IN)),
     h('td', { key: 'o' }, frameCells(conn.out, KNOWN_FRAMES_OUT)),
   ])
