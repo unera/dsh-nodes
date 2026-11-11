@@ -549,6 +549,14 @@ paths:
         Один HTTP-запрос вместо прежних кусков. Требуется `content-length` и
         `seq` в параметрах запроса; данные пишутся в `<path>.inprogress` и
         переименовываются только после сверки sha256.
+
+        Исключение — `pipeFromDevice`: тело может идти chunked, без
+        `content-length`, тогда файл остаётся `.inprogress` до вердикта команды.
+
+        Длина тела не ограничена `maxBodyBytes`: тот потолок только для JSON.
+        Передачу ограничивает `maxTransferBytes` — объявленная длина больше
+        предела получает `413` до записи, поток обрывается, как только перевалил
+        за предел (`.inprogress` удаляется).
       security:
         - nodeToken: []
       parameters:
@@ -566,6 +574,10 @@ paths:
           description: Файл принят, sha256 совпал
         '400':
           description: Нет длины, имени или seq
+        '411':
+          description: Нет `content-length` у передачи, которая не является потоком `pipeFromDevice`
+        '413':
+          description: Тело больше `maxTransferBytes`; для объявленной длины — до записи, для потока — обрыв на ходу
 
   /v1/download-file:
     post:
