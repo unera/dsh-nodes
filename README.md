@@ -100,6 +100,27 @@ nodes.devices()
 ```
 
 
+### Audio pushed by a device
+
+```
+POST /v1/upload-file?type=voice&filetype=wav&id=take-1
+authorization: Bearer <node token>
+x-seconds: 4.8            (optional)
+<wav bytes>
+→ 202 {"accepted":true,"id":"take-1","path":"…/cache/voice/incoming/take-1.wav","bytes":N,"seconds":4.8}
+```
+
+No `seq`, no command: the device pushes, the host receives. `filetype` is one of
+`wav ogg opus mp3 m4a flac`; the path is chosen by the server, never by the device; the write
+is atomic (`.inprogress` → rename) and bounded by `maxTransferBytes`. After the file is stored
+the host emits `dsh-nodes/voice` `{node, nodeName, id, path, bytes, seconds}`.
+
+### Event types
+
+`POST /v1/events` carries `type`: `notify` (a button in the shade — the old behaviour,
+and the default when the field is absent) or `form` (answered `501` until form replies exist).
+Anything else is `400 bad_type`.
+
 Devices can also ask the host for attention without producing a message: `POST /v1/events`
 with `{ "voice": { "want": "record", "mode": "ptt" } }` and no text answers `202` and emits
 `dsh-nodes/voice-want` for whoever listens. Nothing is delivered to a session, and no session
