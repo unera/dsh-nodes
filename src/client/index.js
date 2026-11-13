@@ -650,6 +650,30 @@ function NodesPanel () {
       ]),
     ]),
 
+    // A node that has no code asks to be let in by itself: the request is the only way to
+    // confirm it, so it hides while there is nothing to confirm and never otherwise. It used
+    // to disappear for good — the whole section was deleted in 2804a1b along with the empty
+    // case, and the state kept being fetched for a table nobody rendered.
+    pending.length === 0 ? null : h('section', { key: 'pending', style: only('connections') }, [
+      h('h3', { key: 'h' }, `${t('pending.title')} (${pending.length})`),
+      h('table', { key: 't' }, [
+        h('thead', { key: 'head' }, h('tr', null, [
+          h('th', { key: 'n' }, t('nodes.name')), h('th', { key: 'i' }, 'id'), h('th', { key: 'a' }, t('pending.title')),
+          h('th', { key: 'w' }, t('state.hung')), h('th', { key: 'x' }, ''),
+        ])),
+        h('tbody', { key: 'body' }, pending.map((row) => h('tr', { key: row.uuid }, [
+          h('td', { key: 'n' }, row.name),
+          h('td', { key: 'i' }, h('code', null, row.short)),
+          h('td', { key: 'a' }, row.ip ?? '—'),
+          h('td', { key: 'w' }, `${row.waiting} ${t('unit.sec')}`),
+          h('td', { key: 'x' }, h('div', { className: 'row' }, [
+            h('button', { key: 'y', className: 'primary', disabled: busy, onClick: () => run({ op: 'approve', id: row.uuid }, t('pending.allowed')) }, t('pending.allow')),
+            h('button', { key: 'r', className: 'danger', disabled: busy, onClick: () => run({ op: 'reject', id: row.uuid }, t('pending.denied')) }, t('pending.deny')),
+          ])),
+        ]))),
+      ]),
+    ]),
+
     h('section', { key: 'nodes', style: only('connections') }, [
       h('h3', { key: 'h' }, `${t('nodes.title')} (${nodes.length})`),
       nodes.length === 0
