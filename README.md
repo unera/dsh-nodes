@@ -110,6 +110,11 @@ x-seconds: 4.8            (optional)
 → 202 {"accepted":true,"id":"take-1","path":"…/cache/voice/incoming/take-1.wav","bytes":N,"seconds":4.8}
 ```
 
+Optional measurement headers, all epoch milliseconds: `x-record-start`, `x-record-stop`,
+`x-sent-at` (a nonsense value is ignored, never a reason to refuse a recording). They arrive in
+the event as `at: {recordStart, recordStop, sentAt, receivedAt}`, where `receivedAt` is stamped
+by the server before the first byte.
+
 No `seq`, no command: the device pushes, the host receives. `filetype` is one of
 `wav ogg opus mp3 m4a flac`; the path is chosen by the server, never by the device; the write
 is atomic (`.inprogress` → rename) and bounded by `maxTransferBytes`. After the file is stored

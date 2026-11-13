@@ -10,6 +10,7 @@ import { Queue } from '../lib/queue.mjs'
 import { createNodesServer } from '../lib/server.mjs'
 import {
   eventTypeOf,
+  headerEpoch,
   headerSeconds,
   voiceFiletype,
   voiceTargetPath,
@@ -55,6 +56,15 @@ test('the optional length header is a number or nothing', () => {
   assert.equal(headerSeconds({}), null)
   assert.equal(headerSeconds({ 'x-seconds': 'скоро' }), null)
   assert.equal(headerSeconds({ 'x-seconds': '0' }), null)
+})
+
+test('client timestamps are accepted only as whole positive milliseconds', () => {
+  assert.equal(headerEpoch({ 'x-sent-at': '1763038800123' }, 'x-sent-at'), 1763038800123)
+  assert.equal(headerEpoch({ 'x-sent-at': '12.5' }, 'x-sent-at'), null)
+  assert.equal(headerEpoch({ 'x-sent-at': '-5' }, 'x-sent-at'), null)
+  assert.equal(headerEpoch({ 'x-sent-at': '0' }, 'x-sent-at'), null)
+  assert.equal(headerEpoch({ 'x-sent-at': 'вчера' }, 'x-sent-at'), null)
+  assert.equal(headerEpoch({}, 'x-sent-at'), null)
 })
 
 test('an event without a type is a notify, and the host says so once', () => {
@@ -111,7 +121,15 @@ test('a recording pushed by the device is stored and announced', async (t) => {
   const bytes = Buffer.from('RIFF....WAVEfmt ')
   const answer = await fetch(`${base}/v1/upload-file?type=voice&filetype=wav&id=take-1`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length), 'x-seconds': '4.8' },
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-length': String(bytes.length),
+      'x-seconds': '4.8',
+      'x-record-start': '1763038800000',
+      'x-record-stop': '1763038804800',
+      'x-sent-at': '1763038804900',
+      'x-record-garbage': 'yesterday',
+    },
     body: bytes,
   })
   const body = await answer.json()
@@ -126,14 +144,17 @@ test('a recording pushed by the device is stored and announced', async (t) => {
 
   assert.equal(events.length, 1)
   assert.equal(events[0].name, 'dsh-nodes/voice')
-  assert.deepEqual(events[0].payload, {
-    node: node.id,
-    nodeName: 'phone',
-    id: 'take-1',
-    path: body.path,
-    bytes: bytes.length,
-    seconds: 4.8,
-  })
+  const payload = events[0].payload
+  assert.equal(payload.node, node.id)
+  assert.equal(payload.nodeName, 'phone')
+  assert.equal(payload.id, 'take-1')
+  assert.equal(payload.path, body.path)
+  assert.equal(payload.bytes, bytes.length)
+  assert.equal(payload.seconds, 4.8)
+  assert.equal(payload.at.recordStart, 1763038800000)
+  assert.equal(payload.at.recordStop, 1763038804800)
+  assert.equal(payload.at.sentAt, 1763038804900)
+  assert.ok(Number.isInteger(payload.at.receivedAt) && payload.at.receivedAt > 0, 'the server stamps its own arrival')
 })
 
 test('a refused recording writes nothing and announces nothing', async (t) => {
@@ -184,4 +205,20 @@ test('the command path is untouched: no type=voice means no voice route', async 
   assert.ok(['wrong_command', 'no_command', 'bad_request'].includes(body.code) || body.code, `unexpected code ${body.code}`)
   assert.deepEqual(events, [], 'the voice route did not run')
   assert.equal(existsSync(join(dir, 'incoming')), false, 'nothing was written for a voice upload')
+})
+
+test('an upload without client timestamps still arrives, with only receivedAt', async (t) => {
+  const { base, token, events } = await stand(t)
+  const bytes = Buffer.from('RIFF')
+  const answer = await fetch(`${base}/v1/upload-file?type=voice&filetype=wav&id=plain`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length) },
+    body: bytes,
+  })
+  assert.equal(answer.status, 202)
+  const payload = events[0].payload
+  assert.equal(payload.at.recordStart, null)
+  assert.equal(payload.at.recordStop, null)
+  assert.equal(payload.at.sentAt, null)
+  assert.ok(payload.at.receivedAt > 0)
 })
