@@ -668,10 +668,14 @@ function NodesPanel () {
               setEditorError('')
               setEditing((current) => (current === id ? null : id))
             },
-            onRevoke: (id) => {
-              if (typeof window !== 'undefined' && !window.confirm(t('confirm.revoke', { id }))) return
+            onRevoke: () => {
+              // the token dies at once and cannot be restored: the dialog names the device,
+              // because "node 17" is exactly the kind of label one confirms without reading
+              const label = node.name || node.aliases?.[0] || `#${node.id}`
+              if (typeof window !== 'undefined' &&
+                !window.confirm(t('confirm.revoke', { name: label, id: node.id }))) return
               setSecret(null)
-              run({ op: 'token', id }, t('nodes.tokenReissued'))
+              run({ op: 'token', id: node.id }, t('nodes.tokenReissued'))
             },
               onDelete: (id) => {
                 if (typeof window !== 'undefined' && !window.confirm(`Удалить узел ${id}?`)) return
