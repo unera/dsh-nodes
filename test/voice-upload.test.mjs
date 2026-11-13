@@ -13,6 +13,7 @@ import {
   headerEpoch,
   headerSeconds,
   voiceFiletype,
+  voiceSynth,
   voiceTargetPath,
   voiceUploadId,
   VOICE_FILETYPES,
@@ -49,6 +50,15 @@ test('the server, not the device, chooses where a recording lands', () => {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous
   }
+})
+
+test('which side speaks is device by default and host on request', () => {
+  assert.equal(voiceSynth('host'), 'host')
+  assert.equal(voiceSynth('HOST'), 'host')
+  assert.equal(voiceSynth('device'), 'device')
+  assert.equal(voiceSynth(''), 'device')
+  assert.equal(voiceSynth(undefined), 'device')
+  assert.equal(voiceSynth('espeak'), 'device', 'a typo costs nothing, it does not break an upload')
 })
 
 test('the optional length header is a number or nothing', () => {
@@ -155,6 +165,7 @@ test('a recording pushed by the device is stored and announced', async (t) => {
   assert.equal(payload.at.recordStop, 1763038804800)
   assert.equal(payload.at.sentAt, 1763038804900)
   assert.ok(Number.isInteger(payload.at.receivedAt) && payload.at.receivedAt > 0, 'the server stamps its own arrival')
+  assert.equal(payload.synth, 'device', 'no synth parameter means the fast path')
 })
 
 test('a refused recording writes nothing and announces nothing', async (t) => {
@@ -221,4 +232,28 @@ test('an upload without client timestamps still arrives, with only receivedAt', 
   assert.equal(payload.at.recordStop, null)
   assert.equal(payload.at.sentAt, null)
   assert.ok(payload.at.receivedAt > 0)
+})
+
+test('synth=host travels into the event', async (t) => {
+  const { base, token, events } = await stand(t)
+  const bytes = Buffer.from('RIFF')
+  const answer = await fetch(`${base}/v1/upload-file?type=voice&filetype=wav&id=hosted&synth=host`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length) },
+    body: bytes,
+  })
+  assert.equal(answer.status, 202)
+  assert.equal(events[0].payload.synth, 'host')
+})
+
+test('a junk synth value is received as device, not refused', async (t) => {
+  const { base, token, events } = await stand(t)
+  const bytes = Buffer.from('RIFF')
+  const answer = await fetch(`${base}/v1/upload-file?type=voice&filetype=wav&id=typo&synth=espeak`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length) },
+    body: bytes,
+  })
+  assert.equal(answer.status, 202)
+  assert.equal(events[0].payload.synth, 'device')
 })

@@ -115,6 +115,10 @@ Optional measurement headers, all epoch milliseconds: `x-record-start`, `x-recor
 the event as `at: {recordStart, recordStop, sentAt, receivedAt}`, where `receivedAt` is stamped
 by the server before the first byte.
 
+`synth=device|host` tells the host which side speaks the answer: `device` (default, and what a
+typo becomes) means the phone reads the text itself and the host does no synthesis at all;
+`host` means the host renders the audio and the device only plays it.
+
 No `seq`, no command: the device pushes, the host receives. `filetype` is one of
 `wav ogg opus mp3 m4a flac`; the path is chosen by the server, never by the device; the write
 is atomic (`.inprogress` → rename) and bounded by `maxTransferBytes`. After the file is stored
