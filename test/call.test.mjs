@@ -148,3 +148,64 @@ test('a device with events disabled is refused even for a voice request', () => 
   assert.equal(answer.status, 403)
   assert.equal(answer.payload.code, 'events_disabled')
 })
+
+test('devices() reports the registry and asks no device anything', async () => {
+  const calls = []
+  const queue = new Queue({ epoch: 1, defaultTimeout: 5, maxBatch: 5, maxQueue: 100, commandTtl: 300 })
+  // a store whose only job is the roster: any attempt to reach a node would fail here
+  const store = {
+    nodes: () => [
+      { id: 19, name: 'Телефон', aliases: ['A059P'], client_version: 'android-0.10.19', last_seen: Date.now() - 1000 },
+      { id: 5, name: 'Lenovo', aliases: ['nbw', 'laptop'], client_version: 'desktop-0.0.114', last_seen: Date.now() - 10 * 60_000 },
+      { id: 7, name: 'Без версии', aliases: [], client_version: null, last_seen: 0 },
+    ],
+    node: () => { throw new Error('devices() must not look up one node') },
+    nodeApis: () => [],
+    api: () => null,
+  }
+  const caller = createNodeCaller({
+    store,
+    queue,
+    config: { aliveTimeoutSeconds: 60 },
+    notify: (nodeId) => calls.push(nodeId),
+  })
+
+  const devices = caller.devices()
+  assert.deepEqual(devices, [
+    { id: 19, name: 'Телефон', alias: 'A059P', online: true, version: 'android-0.10.19' },
+    { id: 5, name: 'Lenovo', alias: 'nbw', online: false, version: 'desktop-0.0.114' },
+    { id: 7, name: 'Без версии', alias: null, online: false, version: null },
+  ])
+  assert.deepEqual(calls, [], 'nothing may be queued for a roster read')
+  assert.equal(queue.info(19).max_commandno, 0)
+})
+
+test('an explicit presence source wins over the last link time', () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 5, maxBatch: 5, maxQueue: 100, commandTtl: 300 })
+  const store = {
+    nodes: () => [{ id: 19, name: 'Телефон', aliases: ['A059P'], client_version: 'x', last_seen: 0 }],
+  }
+  const seen = []
+  const caller = createNodeCaller({
+    store,
+    queue,
+    config: { aliveTimeoutSeconds: 60 },
+    online: (nodeId) => { seen.push(nodeId); return true },
+  })
+  assert.equal(caller.devices()[0].online, true)
+  assert.deepEqual(seen, [19])
+})
+
+test('a presence source that answers nothing falls back to the last link time', () => {
+  const queue = new Queue({ epoch: 1, defaultTimeout: 5, maxBatch: 5, maxQueue: 100, commandTtl: 300 })
+  const store = {
+    nodes: () => [{ id: 19, name: 'A059P', aliases: ['phone'], client_version: 'x', last_seen: Date.now() - 500 }],
+  }
+  const caller = createNodeCaller({
+    store,
+    queue,
+    config: { aliveTimeoutSeconds: 60 },
+    online: () => undefined,
+  })
+  assert.equal(caller.devices()[0].online, true)
+})

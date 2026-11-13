@@ -91,6 +91,15 @@ if (answer.status === 'ok') use(answer.payload)
 checks the arguments against the declared schema, and returns `{status, code, message,
 results, payload}` — `payload` being the parsed JSON of the device's last result block.
 
+`devices()` answers the roster without touching a single device — a settings page must not
+wait for hardware that is asleep:
+
+```js
+nodes.devices()
+// [{ id: 19, name: 'Телефон', alias: 'A059P', online: true, version: 'android-0.10.22' }]
+```
+
+
 Devices can also ask the host for attention without producing a message: `POST /v1/events`
 with `{ "voice": { "want": "record", "mode": "ptt" } }` and no text answers `202` and emits
 `dsh-nodes/voice-want` for whoever listens. Nothing is delivered to a session, and no session

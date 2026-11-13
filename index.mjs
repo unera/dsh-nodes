@@ -264,6 +264,8 @@ export function apply (ctx, config) {
     config,
     caller: 'plugin',
     log,
+    // presence по сокету знает точнее, чем время последней связи; без него решает last_seen
+    online: (nodeId) => presence?.online?.(nodeId),
   })
   ctx.effect(() => ctx.reflect.provide('nodes', caller))
   ctx.effect(() => () => {
