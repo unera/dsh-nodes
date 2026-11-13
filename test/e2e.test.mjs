@@ -229,6 +229,36 @@ t('an enrollment request: pending → approve → the token comes once', async (
   assert.equal(second.status, 409)
 })
 
+t('a request from a known device revives its own node, it does not make a twin', async () => {
+  // the phone that lost its token comes back with the same uuid: confirming it must give it
+  // its node back, with its name, its aliases and its rights — not a second entry in the list
+  const uuid = 'eeee-ffff-0000-1111'
+  const created = await admin('/nodes', { method: 'POST', body: JSON.stringify({ name: 'twin-phone' }) })
+  const nodeId = created.body.node.id
+  store.db.prepare('UPDATE node SET uuid = ?, access = ? WHERE id = ?').run(uuid, 'read-only', nodeId)
+  const firstAliases = store.aliases(nodeId)
+  const total = store.db.prepare('SELECT count(*) AS c FROM node').get().c
+
+  await admin(`/nodes/${nodeId}/token`, { method: 'POST', body: '' })
+  const requested = await fetch(`${base}/v1/enroll`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uuid, name: 'twin-phone' }),
+  })
+  assert.equal(requested.status, 202)
+
+  const approved = await admin(`/pending/${uuid}/approve`, { method: 'POST', body: '{}' })
+  assert.equal(approved.status, 200)
+  assert.equal(approved.body.node.id, nodeId, 'устройство должно получить свой прежний узел')
+  assert.equal(store.db.prepare('SELECT count(*) AS c FROM node').get().c, total, 'узла-двойника быть не должно')
+  assert.deepEqual(store.aliases(nodeId), firstAliases, 'имя и алиасы не меняются')
+  assert.equal(store.node(nodeId).access, 'read-only', 'права не сбрасываются в none')
+
+  const handed = await fetch(`${base}/v1/enroll/${uuid}`)
+  assert.equal(handed.status, 200)
+  assert.ok((await handed.json()).token)
+})
+
 t('no token is a 401, a bad token is a 401', async () => {
   const noToken = await fetch(`${base}/v1/commands?after=0`)
   assert.equal(noToken.status, 401)
