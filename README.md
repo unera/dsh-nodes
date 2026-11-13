@@ -75,6 +75,27 @@ The client exchanges the code for a token itself — nothing to approve in the
 panel. The code is stored hashed only: reuse gives `409`, an expired code
 `410`.
 
+## Calling a node from another plugin
+
+The tools above are for the model. A plugin that needs to ask a device something gets the
+`nodes` service instead, which is the same queue and the same audit trail without the
+approval dialogue a tool call goes through:
+
+```js
+const nodes = ctx.get('nodes')            // or declare `nodes` in your own inject map
+const answer = await nodes.call('phone', 'voice', 'record', { mode: 'ptt' }, { timeout: 45 })
+if (answer.status === 'ok') use(answer.payload)
+```
+
+`call(node, api, method, data, options)` accepts an alias or a node id, an API name or id,
+checks the arguments against the declared schema, and returns `{status, code, message,
+results, payload}` — `payload` being the parsed JSON of the device's last result block.
+
+Devices can also ask the host for attention without producing a message: `POST /v1/events`
+with `{ "voice": { "want": "record", "mode": "ptt" } }` and no text answers `202` and emits
+`dsh-nodes/voice-want` for whoever listens. Nothing is delivered to a session, and no session
+is required.
+
 ## Access control on a node
 
 The owner of the machine decides how much the server may do there. Three values,

@@ -24,6 +24,7 @@ import { renderAdmin } from './lib/admin.mjs'
 import { handleAdmin, handleAdminOp } from './lib/admin-api.mjs'
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 import { createTools } from './lib/tools.mjs'
+import { createNodeCaller } from './lib/call.mjs'
 import { modeFromPolicy } from './lib/policy.mjs'
 
 export const name = 'dsh-nodes'
@@ -155,6 +156,9 @@ export function apply (ctx, config) {
   const services = {
     sessions: ctx.sessions ?? null,
     sessionController: ctx.sessionController ?? null,
+    // устройства шлют события, которые не должны превращаться в сообщение сессии
+    // (например «хочу говорить») — их принимает подписчик в другом плагине
+    emit: (event, payload) => ctx.emit(event, payload),
   }
   // результат служебной команды никто не ждёт: пишем в журнал, если не ok
   queue.setControlLog?.((nodeId, method, args, outcome) => {
@@ -246,6 +250,22 @@ export function apply (ctx, config) {
       log('warn', `не удалось зарегистрировать ${tool.name}: ${error.message}`)
     }
   }
+
+  // ── сервис для других плагинов ───────────────────────────────────────────
+  // Модель ходит в узлы инструментом; плагину нужен тот же путь без диалога
+  // согласований, которого у него нет. Объявляем обычным объектом через
+  // `reflect.provide`: framework-классы из плагина не импортируются (cordis не
+  // резолвится из дерева профиля), а provide — ровно то, что делает внутри
+  // конструктор Service.
+  const caller = createNodeCaller({
+    store,
+    queue,
+    notify: (nodeId) => presence?.notify(nodeId),
+    config,
+    caller: 'plugin',
+    log,
+  })
+  ctx.effect(() => ctx.reflect.provide('nodes', caller))
   ctx.effect(() => () => {
     for (const dispose of unregister) {
       try {

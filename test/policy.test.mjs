@@ -52,7 +52,8 @@ test('every service we access directly is declared in inject', () => {
   // a direct access like `ctx.<service>` requires a declaration in inject.
   // `ctx.get('...')` does not, so such accesses do not end up here.
   const used = new Set([...source.matchAll(/ctx\.(\w+)/g)].map((match) => match[1]))
-  const notServices = new Set(['get', 'effect', 'logger', 'plugin', 'on', 'inject', 'emit', 'set'])
+  // `reflect` — не сервис, а штатное API cordis (через него объявляют сервис: ctx.reflect.provide)
+  const notServices = new Set(['get', 'effect', 'logger', 'plugin', 'on', 'inject', 'emit', 'set', 'reflect'])
   const missing = [...used].filter((name) => !notServices.has(name) && !names.includes(name))
   assert.deepEqual(missing, [], `используются, но не объявлены в inject: ${missing.join(', ')}`)
 
