@@ -124,6 +124,16 @@ No `seq`, no command: the device pushes, the host receives. `filetype` is one of
 is atomic (`.inprogress` → rename) and bounded by `maxTransferBytes`. After the file is stored
 the host emits `dsh-nodes/voice` `{node, nodeName, id, path, bytes, seconds}`.
 
+### Starting a new conversation
+
+```
+POST /v1/events  {"type":"voice","action":"new-session"}
+→ 202 {"accepted":true,"action":"new-session","device":"A059P"}
+```
+
+No text, no session: the host emits `dsh-nodes/voice-new-session` `{node, nodeName}`, and the voice
+plugin forgets which session this device was talking to. An unknown `action` is `400 bad_action`.
+
 ### Event types
 
 `POST /v1/events` carries `type`: `notify` (a button in the shade — the old behaviour,
