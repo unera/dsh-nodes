@@ -77,12 +77,40 @@ test('client timestamps are accepted only as whole positive milliseconds', () =>
   assert.equal(headerEpoch({}, 'x-sent-at'), null)
 })
 
-test('an event without a type is a notify, and the host says so once', () => {
+test('a missing type is guessed from the body, and the host says so once', () => {
   const warnings = []
   const warnOnce = (message) => warnings.push(message)
-  assert.deepEqual(eventTypeOf({}, { warnOnce }), { type: 'notify' })
-  assert.deepEqual(eventTypeOf({ type: 'NOTIFY' }, { warnOnce }), { type: 'notify' })
-  assert.equal(warnings.length, 1, 'only the call without a type reports; an explicit notify says nothing')
+  // no notification → the body is text for a session, and it must name both a session and words
+  const guessedSession = eventTypeOf({ session: 's-1', text: 'привет' }, { warnOnce })
+  assert.deepEqual(guessedSession, { type: 'notify-session' })
+  const guessedButton = eventTypeOf({ notification: 'n-1', button: 'b1' }, { warnOnce })
+  assert.deepEqual(guessedButton, { type: 'notify-button' })
+  assert.equal(warnings.length, 2)
+})
+
+test('the old notify type still works in both directions', () => {
+  done: {
+    assert.deepEqual(eventTypeOf({ type: 'notify', notification: 'n-1' }, { warnOnce: () => {} }), { type: 'notify-button' })
+    assert.deepEqual(
+      eventTypeOf({ type: 'notify', session: 's-1', text: 'привет' }, { warnOnce: () => {} }),
+      { type: 'notify-session' },
+    )
+  }
+})
+
+test('each notify type refuses without its own fields', () => {
+  assert.equal(eventTypeOf({ type: 'notify-button' }, { warnOnce: () => {} }).error.status, 400)
+  assert.equal(eventTypeOf({ type: 'notify-button' }, { warnOnce: () => {} }).error.message.includes('уведомления'), true)
+  assert.equal(eventTypeOf({ type: 'notify-session', session: 's-1' }, { warnOnce: () => {} }).error.code, 'bad_request')
+  assert.equal(eventTypeOf({ type: 'notify-session', text: 'привет' }, { warnOnce: () => {} }).error.code, 'bad_request')
+  assert.deepEqual(eventTypeOf({ type: 'notify-session', session: 's-1', text: 'привет' }), { type: 'notify-session' })
+})
+
+test('voice is not an events type: it belongs to the upload route', () => {
+  const refused = eventTypeOf({ type: 'voice' })
+  assert.equal(refused.error.status, 400)
+  assert.equal(refused.error.code, 'bad_type')
+  assert.match(refused.error.message, /\/v1\/upload-file/)
 })
 
 test('a form event is a clear refusal, not a silent notify', () => {
@@ -258,28 +286,30 @@ test('a junk synth value is received as device, not refused', async (t) => {
   assert.equal(events[0].payload.synth, 'device')
 })
 
-test('a voice event asks for a new session and requires no text', async (t) => {
+test('a new-session event requires neither text nor session', async (t) => {
   const { base, token, node, events } = await stand(t)
+  const answer = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'new-session' }),
+  })
+  const body = await answer.json()
+  assert.equal(answer.status, 202)
+  assert.deepEqual(body, { accepted: true, device: 'phone' })
+  assert.deepEqual(events, [{ name: 'dsh-nodes/voice-new-session', payload: { node: node.id, nodeName: 'phone' } }])
+})
+
+test('voice on the events route is refused with a pointer to the upload route', async (t) => {
+  const { base, token, events } = await stand(t)
   const answer = await fetch(`${base}/v1/events`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ type: 'voice', action: 'new-session' }),
   })
-  const body = await answer.json()
-  assert.equal(answer.status, 202)
-  assert.deepEqual(body, { accepted: true, action: 'new-session', device: 'phone' })
-  assert.deepEqual(events, [{ name: 'dsh-nodes/voice-new-session', payload: { node: node.id, nodeName: 'phone' } }])
-})
-
-test('an unknown voice action is refused', async (t) => {
-  const { base, token, events } = await stand(t)
-  const answer = await fetch(`${base}/v1/events`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'voice', action: 'sing' }),
-  })
   assert.equal(answer.status, 400)
-  assert.equal((await answer.json()).code, 'bad_action')
+  const body = await answer.json()
+  assert.equal(body.code, 'bad_type')
+  assert.match(body.message, /upload-file/)
   assert.deepEqual(events, [])
 })
 
@@ -415,27 +445,52 @@ test('a junk synth value is received as device, not refused', async (t) => {
   assert.equal(events[0].payload.synth, 'device')
 })
 
-test('a voice event asks for a new session and requires no text', async (t) => {
-  const { base, token, node, events } = await stand(t)
-  const answer = await fetch(`${base}/v1/events`, {
+
+test('an action on the upload route is ignored, not refused', async (t) => {
+  const { base, token, events } = await stand(t)
+  const bytes = Buffer.from('RIFF')
+  const answer = await fetch(`${base}/v1/upload-file?type=voice&action=file&filetype=wav&id=legacy-1`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'voice', action: 'new-session' }),
+    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length) },
+    body: bytes,
   })
-  const body = await answer.json()
-  assert.equal(answer.status, 202)
-  assert.deepEqual(body, { accepted: true, action: 'new-session', device: 'phone' })
-  assert.deepEqual(events, [{ name: 'dsh-nodes/voice-new-session', payload: { node: node.id, nodeName: 'phone' } }])
+  assert.equal(answer.status, 202, 'a client that still sends action=file keeps working')
+  assert.equal(events[0].payload.id, 'legacy-1')
+
+  const odd = await fetch(`${base}/v1/upload-file?type=voice&action=whatever&filetype=wav&id=legacy-2`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length) },
+    body: bytes,
+  })
+  assert.equal(odd.status, 202, 'an unknown action is ignored too: the route already says what this is')
 })
 
-test('an unknown voice action is refused', async (t) => {
+test('a notify-button without a notification is refused before anything is delivered', async (t) => {
   const { base, token, events } = await stand(t)
   const answer = await fetch(`${base}/v1/events`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'voice', action: 'sing' }),
+    body: JSON.stringify({ type: 'notify-button', button: 'b1' }),
   })
   assert.equal(answer.status, 400)
-  assert.equal((await answer.json()).code, 'bad_action')
+  assert.equal((await answer.json()).code, 'bad_request')
   assert.deepEqual(events, [])
+})
+
+test('a notify-session needs both a session and words', async (t) => {
+  const { base, token } = await stand(t)
+  const withoutText = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'notify-session', session: 's-1' }),
+  })
+  assert.equal(withoutText.status, 400)
+  assert.equal((await withoutText.json()).code, 'bad_request')
+
+  const withoutSession = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'notify-session', text: 'привет' }),
+  })
+  assert.equal(withoutSession.status, 400)
 })

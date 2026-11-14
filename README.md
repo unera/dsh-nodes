@@ -75,6 +75,12 @@ The client exchanges the code for a token itself — nothing to approve in the
 panel. The code is stored hashed only: reuse gives `409`, an expired code
 `410`.
 
+## What a device sends to the host
+
+The full vocabulary — `command`, `voice`, `new-session`, `notify-button`, `notify-session`,
+`form` — lives in [`docs/device-events.md`](docs/device-events.md). It is the single source of
+truth for messages a device starts itself; everything else here is a command the host sends.
+
 ## Calling a node from another plugin
 
 The tools above are for the model. A plugin that needs to ask a device something gets the
