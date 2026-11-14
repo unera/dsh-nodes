@@ -574,3 +574,15 @@ test('an unknown kind is still a report, not a refusal', async (t) => {
   assert.equal(answer.status, 202)
   assert.equal(events[0].payload.kind, 'something-new')
 })
+
+test('opening the voice screen is a warmup request and nothing more', async (t) => {
+  const { base, token, node, events } = await stand(t)
+  const answer = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'voice-warmup' }),
+  })
+  assert.equal(answer.status, 202)
+  assert.deepEqual(await answer.json(), { accepted: true })
+  assert.deepEqual(events, [{ name: 'dsh-nodes/voice-warmup', payload: { node: node.id, nodeName: 'phone' } }])
+})
