@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -493,4 +493,50 @@ test('a notify-session needs both a session and words', async (t) => {
     body: JSON.stringify({ type: 'notify-session', text: 'привет' }),
   })
   assert.equal(withoutSession.status, 400)
+})
+
+/** Register a voice API the way a real client announces it, then queue one command. */
+function voiceCommand (store, queue, node, method, args) {
+  store.announce(node.id, [{
+    name: 'voice',
+    version: 'test',
+    methods: [
+      { method: 'answer', args: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } } } },
+      { method: 'play', args: { type: 'object', properties: { path: { type: 'string' } } } },
+      { method: 'record', args: { type: 'object', properties: {} } },
+    ],
+  }], [], {})
+  const apiId = store.nodeApis(node.id)[0]
+  const { seq } = queue.enqueue({ nodeId: node.id, api: apiId, method, args, timeout: 10 })
+  return { seq, apiId }
+}
+
+test('a voice answer may serve its own file by its seq', async (t) => {
+  const { base, token, store, queue, node, dir } = await stand(t)
+  const file = join(dir, 'answer.ogg')
+  writeFileSync(file, Buffer.from('OggS-test'))
+  const { seq } = voiceCommand(store, queue, node, 'answer', { id: 'ex-1', path: file })
+  queue.take(node.id, { limit: 5 })
+
+  const answer = await fetch(`${base}/v1/download-file?seq=${seq}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+  })
+  assert.equal(answer.status, 200)
+  assert.equal(await answer.text(), 'OggS-test')
+})
+
+test('a record command still cannot serve a file', async (t) => {
+  const { base, token, store, queue, node, dir } = await stand(t)
+  const file = join(dir, 'take.wav')
+  writeFileSync(file, Buffer.from('RIFF'))
+  const { seq } = voiceCommand(store, queue, node, 'record', { path: file })
+  queue.take(node.id, { limit: 5 })
+
+  const answer = await fetch(`${base}/v1/download-file?seq=${seq}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+  })
+  assert.equal(answer.status, 403)
+  assert.equal((await answer.json()).code, 'wrong_command')
 })
