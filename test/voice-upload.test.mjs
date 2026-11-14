@@ -540,3 +540,37 @@ test('a record command still cannot serve a file', async (t) => {
   assert.equal(answer.status, 403)
   assert.equal((await answer.json()).code, 'wrong_command')
 })
+
+test('a bug report is accepted, emitted and bounded', async (t) => {
+  const { base, token, node, events } = await stand(t)
+  const long = 'x'.repeat(2500)
+  const answer = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'bug-report', id: 'ex-1', kind: 'tts-failed', text: long, app: '0.10.41' }),
+  })
+  assert.equal(answer.status, 202)
+  assert.deepEqual(await answer.json(), { accepted: true, id: 'ex-1' })
+
+  assert.equal(events.length, 1)
+  assert.equal(events[0].name, 'dsh-nodes/bug-report')
+  const payload = events[0].payload
+  assert.equal(payload.node, node.id)
+  assert.equal(payload.nodeName, 'phone')
+  assert.equal(payload.id, 'ex-1')
+  assert.equal(payload.kind, 'tts-failed')
+  assert.equal(payload.app, '0.10.41')
+  assert.equal(payload.text.length, 2000, 'the text is cut to the limit')
+  assert.ok(payload.text.endsWith('…'))
+})
+
+test('an unknown kind is still a report, not a refusal', async (t) => {
+  const { base, token, events } = await stand(t)
+  const answer = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'bug-report', id: 'ex-2', kind: 'something-new', text: 'привет' }),
+  })
+  assert.equal(answer.status, 202)
+  assert.equal(events[0].payload.kind, 'something-new')
+})
