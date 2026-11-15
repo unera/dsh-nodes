@@ -60,6 +60,9 @@ export const Config = z.object({
   // The one knob for a transfer, whatever way it goes: a declared length is refused before
   // anything is written, a chunked stream is cut off as soon as it crosses the limit.
   maxTransferBytes: z.natural().default(536870912).description('Потолок одной передачи файла (upload-file/download-file), байт; на JSON-тело не влияет'),
+  // A recording is seconds long, and this route is authorized by a device token alone: without its
+  // own ceiling one leaked token could fill the disk with the general transfer limit.
+  maxVoiceBytes: z.natural().default(16777216).description('Потолок одного голосового аплоада (type=voice), байт'),
   aliveTimeoutSeconds: z.natural().default(60).description('Сколько без обращений считать узел живым'),
   // Пинг по сокету включён по умолчанию: без него полумёртвое соединение
   // (сеть пропала, а TCP никто не закрыл) висит в присутствии как живое, и

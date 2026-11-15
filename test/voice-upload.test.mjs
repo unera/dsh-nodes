@@ -37,14 +37,19 @@ test('an id is either given safely or minted, never taken raw', () => {
 })
 
 test('the server, not the device, chooses where a recording lands', () => {
-  const configured = voiceTargetPath({ config: { voiceCacheDir: '/srv/voice' }, id: 't1', filetype: 'wav' })
-  assert.equal(configured, '/srv/voice/t1.wav')
+  const configured = voiceTargetPath({ config: { voiceCacheDir: '/srv/voice' }, id: 't1', filetype: 'wav', node: 19 })
+  assert.equal(configured, '/srv/voice/19/t1.wav')
+  // two devices may send the same id; they must not land on one file
+  assert.notEqual(
+    voiceTargetPath({ config: { voiceCacheDir: '/srv/voice' }, id: 't1', filetype: 'wav', node: 19 }),
+    voiceTargetPath({ config: { voiceCacheDir: '/srv/voice' }, id: 't1', filetype: 'wav', node: 20 }),
+  )
   const previous = process.env.DSH_HOME
   process.env.DSH_HOME = '/home/dsh/work/ai/.dsh'
   try {
     assert.equal(
-      voiceTargetPath({ config: {}, id: 't2', filetype: 'ogg' }),
-      '/home/dsh/work/ai/.dsh/cache/voice/incoming/t2.ogg',
+      voiceTargetPath({ config: {}, id: 't2', filetype: 'ogg', node: 7 }),
+      '/home/dsh/work/ai/.dsh/cache/voice/incoming/7/t2.ogg',
     )
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME
@@ -124,7 +129,7 @@ test('a form event is a clear refusal, not a silent notify', () => {
 })
 
 /** A server with one registered node and a directory for recordings. */
-async function stand (t, { maxTransferBytes = 1_000_000 } = {}) {
+async function stand (t, { maxTransferBytes = 1_000_000, maxVoiceBytes = undefined } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-nodes-voice-'))
   const store = new Store(join(dir, 'nodes.sqlite'))
   const epoch = store.bumpEpoch()
@@ -137,6 +142,7 @@ async function stand (t, { maxTransferBytes = 1_000_000 } = {}) {
       routePrefix: '/dsh-nodes',
       maxBodyBytes: 65536,
       maxTransferBytes,
+      ...maxVoiceBytes === undefined ? {} : { maxVoiceBytes },
       aliveTimeoutSeconds: 60,
       voiceCacheDir: join(dir, 'incoming'),
     },
@@ -176,7 +182,7 @@ test('a recording pushed by the device is stored and announced', async (t) => {
   assert.equal(body.id, 'take-1')
   assert.equal(body.bytes, bytes.length)
   assert.equal(body.seconds, 4.8)
-  assert.equal(body.path, join(dir, 'incoming', 'take-1.wav'))
+  assert.equal(body.path, join(dir, 'incoming', String(node.id), 'take-1.wav'))
   assert.deepEqual(readFileSync(body.path), bytes, 'the stored bytes are exactly what was sent')
   assert.equal(existsSync(`${body.path}.inprogress`), false, 'no half file is left behind')
 
@@ -335,7 +341,7 @@ test('a recording pushed by the device is stored and announced', async (t) => {
   assert.equal(body.id, 'take-1')
   assert.equal(body.bytes, bytes.length)
   assert.equal(body.seconds, 4.8)
-  assert.equal(body.path, join(dir, 'incoming', 'take-1.wav'))
+  assert.equal(body.path, join(dir, 'incoming', String(node.id), 'take-1.wav'))
   assert.deepEqual(readFileSync(body.path), bytes, 'the stored bytes are exactly what was sent')
   assert.equal(existsSync(`${body.path}.inprogress`), false, 'no half file is left behind')
 
@@ -585,4 +591,32 @@ test('opening the voice screen is a warmup request and nothing more', async (t) 
   assert.equal(answer.status, 202)
   assert.deepEqual(await answer.json(), { accepted: true })
   assert.deepEqual(events, [{ name: 'dsh-nodes/voice-warmup', payload: { node: node.id, nodeName: 'phone' } }])
+})
+
+test('the old voice.want shape no longer ends in a 500', async (t) => {
+  const { base, token, events, node } = await stand(t)
+  const answer = await fetch(`${base}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ voice: { want: 'record', mode: 'ptt' } }),
+  })
+  assert.notEqual(answer.status, 500, 'an installed client must not get a server error')
+  assert.equal(answer.status, 202)
+  assert.deepEqual(await answer.json(), { accepted: true, device: 'phone', mode: 'ptt' })
+  assert.equal(events[0].name, 'dsh-nodes/voice-want')
+  assert.equal(events[0].payload.node, node.id)
+  assert.deepEqual(events[0].payload, { node: node.id, nodeName: 'phone', mode: 'ptt', sessionId: null })
+})
+
+test('a voice upload has its own size ceiling', async (t) => {
+  const { base, token, events } = await stand(t, { maxVoiceBytes: 1024 })
+  const bytes = Buffer.alloc(2048, 1)
+  const answer = await fetch(`${base}/v1/upload-file?type=voice&filetype=wav&id=big`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length) },
+    body: bytes,
+  })
+  assert.equal(answer.status, 413)
+  assert.equal((await answer.json()).code, 'too_big')
+  assert.deepEqual(events, [], 'nothing is stored or announced')
 })
