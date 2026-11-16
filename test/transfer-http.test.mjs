@@ -32,6 +32,9 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}/dsh-nodes`
   const created = store.createNode({ name: 'test-node', access: 'workspace-write' })
   token = created.token
+  // events are off by default since 0.4.0 (the owner's switch). Two tests in this file are
+  // about a delivered event, so the fixture says out loud that this node may send them.
+  store.updateNode(created.node.id, { events_enabled: 1 })
   store.announce(created.node.id, [{ name: 'transfer', version: '1', methods: [{ method: 'files.download', args: { type: 'object' } }] }])
 })
 

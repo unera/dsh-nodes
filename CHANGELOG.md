@@ -8,13 +8,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A version number is a commit that bumps `package.json`; git tags are not kept for every
 release, so the history of a version is the range between two such commits.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-16
 
 ### Added
 
 - `CHANGELOG.md`, with the history of 0.3.26–0.3.40 reconstructed from the commits.
+- A node has an owner-controlled switch for device events: the column
+  `events_enabled INTEGER NOT NULL DEFAULT 0`, `eventsEnabled` in `nodeView`, the operation
+  `{op: "events", id, body: {enabled}}` (and `/nodes/{id}/events`), and a checkbox
+  "Events allowed" on the node's page in the panel. `updateNode` takes the same flag as
+  `events_enabled`, a boolean normalised to 0/1.
+- The panel's explanation names exactly what the switch covers — `notify-button`,
+  `notify-session`, `new-session`, `voice-warmup`, `bug-report` and the legacy `voice.want` —
+  and says that voice recordings (`/v1/upload-file?type=voice`) and commands keep working.
+  A node with the switch off gets a grey `events off` badge, not a failure mark.
+- `updateNode` refuses an unknown field with `400` instead of ignoring it: a typo like `events`
+  used to look applied while nothing changed.
 
 ### Changed
+
+- **breaking for existing nodes:** events are now off unless the owner allows them. The column
+  defaults to `0`, so **after the upgrade every node that already exists stops accepting
+  events** until the switch is turned on: `/v1/events` answers `403 events_disabled` for
+  `notify-button`, `notify-session`, `new-session`, `voice-warmup`, `bug-report` and the legacy
+  `voice.want`. Nothing else changes — the socket stays up, commands run, `/v1/state` and
+  `/v1/commands` answer, and recordings still arrive at `/v1/upload-file?type=voice`. A voice
+  plugin therefore stops receiving `voice-warmup` and `new-session` on its own nodes.
+- `test/voice-upload.test.mjs`: its `stand()` now allows events on the node explicitly. Those
+  tests are about the event routes, and the default they relied on no longer exists.
 
 - `PUT /v1/announce` can no longer widen a node's permissions. `access`, `base`,
   `allowEscalation` and `approver` are written by both the admin panel and the node, so one
@@ -48,6 +69,9 @@ release, so the history of a version is the range between two such commits.
 
 - `docs/device-events.md` describes `{"voice":{"want":"record"}}` — deprecated, still
   supported, and the only shape without a `type`.
+- `README.md` and `docs/guide.ru.md`: the events switch, its default and what an upgrade does to
+  a node that is already connected; `docs/device-events.md` describes the `403
+  events_disabled` answer and that a recording is not an event.
 
 ## [0.3.40] - 2026-11-15
 

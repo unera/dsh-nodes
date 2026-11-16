@@ -110,10 +110,26 @@ npm install /path/to/dsh-nodes
 
 Админ (за логином DSH, не по админ-токену): `/api/dsh-nodes/admin` — страница,
 `/api/dsh-nodes/op` — одна операция (создать, переименовать, выдать токен,
-удалить, допустить заявку), `/api/dsh-nodes/nodes`, `/catalog`, `/pending`,
-`/audit`, `/settings` — чтение. Правка узла идёт через `op` с `{op: "update"}`:
-`access`, `base`, `approver`, `allowEscalation`, `workdir`, `default_timeout`,
-`aliases`.
+`events` — разрешить или запретить события узла, удалить, допустить заявку),
+`/api/dsh-nodes/nodes`, `/catalog`, `/pending`, `/audit`, `/settings` — чтение.
+Правка узла идёт через `op` с `{op: "update"}`: `access`, `base`, `approver`,
+`allowEscalation`, `workdir`, `default_timeout`, `aliases`, `events_enabled`
+(`true`/`false`, в колонке 0/1). Неизвестное поле — `400`, а не тишина: опечатка
+вроде `events` иначе выглядела бы применённой. Только флаг меняет отдельная
+операция `{op: "events", id, body: {enabled: true}}` — она не трогает остальные
+поля узла.
+
+### События: разрешение владельца
+
+Колонка `events_enabled INTEGER NOT NULL DEFAULT 0` — **по умолчанию события
+запрещены**, и у всех узлов, заведённых до 0.4.0, флаг после обновления выключен.
+Переключатель «События разрешены» стоит на странице узла в панели.
+
+Выключенный флаг закрывает только маршрут событий: `notify-button`,
+`notify-session`, `new-session`, `voice-warmup`, `bug-report` и устаревший
+`voice.want` получают `403 events_disabled`. Узел при этом на связи, `/v1/state`
+и `/v1/commands` работают, команды идут, а голосовые записи
+(`POST /v1/upload-file?type=voice`) принимаются как обычно — запись не событие.
 
 ## Разработка
 

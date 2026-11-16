@@ -156,6 +156,27 @@ with `{ "voice": { "want": "record", "mode": "ptt" } }` and no `type` answers `2
 `dsh-nodes/voice-want` for whoever listens. Nothing is delivered to a session, and no session
 is required. The shape is deprecated but supported — see the same reference.
 
+### Are events allowed at all?
+
+Events are a privilege the owner grants, not something a paired device gets for free. The node
+row carries `events_enabled INTEGER NOT NULL DEFAULT 0`: **a node that was never allowed sends
+nothing**. The switch is on the node's page in the panel ("Events allowed"), and the admin API
+sets the same flag either as `{"op": "update", "id": N, "body": {"events_enabled": true}}` or as
+`{"op": "events", "id": N, "body": {"enabled": true}}`; the flag is also read in `nodeView`
+as `eventsEnabled`.
+
+Off means off for the event routes only. `POST /v1/events` answers `403 events_disabled` for
+`notify-button`, `notify-session`, `new-session`, `voice-warmup`, `bug-report` and the legacy
+`voice.want`. Everything else keeps working: the socket stays up, `GET /v1/state` and
+`GET /v1/commands` serve the node, commands run, and a recording still arrives at
+`POST /v1/upload-file?type=voice` — the microphone is not the switch, and the panel says so
+next to the checkbox.
+
+**Upgrading from 0.3.x turns events off on every existing node**, because that is the default.
+The device is not broken: it stays connected and commands go through, only the event routes
+answer `403` until the owner flips the switch. A voice plugin therefore stops receiving
+`voice-warmup` and `new-session` — the first thing to check after an upgrade.
+
 ## Access control on a node
 
 The owner of the machine decides how much the server may do there. Three values,

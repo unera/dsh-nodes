@@ -236,6 +236,17 @@ function approverBadge (approver) {
   return h('span', { key: 'approver', className: 'badge', title: t(view.key) }, view.glyph)
 }
 
+/**
+ * Плашка «события выключены».
+ *
+ * Выключенный флаг — это не поломка: узел на связи, команды идут, записи принимаются.
+ * Поэтому плашка серая и с объяснением, а не красная и не «offline».
+ */
+function eventsBadge (node) {
+  if (node.eventsEnabled) return null
+  return h('span', { key: 'events', className: 'badge', title: t('nodes.eventsOffHint') }, t('nodes.eventsOff'))
+}
+
 function pillState (node) {
   if (!pillOnline(node)) return 'off'
   const age = node.lastSeen ? Date.now() - node.lastSeen : Infinity
@@ -302,18 +313,30 @@ function GlyphButton ({ kind, title, onClick, disabled, className }) {
   }, h(Glyph, { kind }))
 }
 
-/** Форма правки узла: имя и алиасы. Открывается над списком. */
+/**
+ * Форма правки узла: имя, алиасы и разрешение на события. Открывается над списком.
+ *
+ * Выключатель событий — здесь же, потому что это свойство узла, а не отдельная
+ * страница: включил и закрыл. Пояснение рядом обязательно: «выключить события»
+ * человек прочитает как «выключить устройство», а голосовые записи при этом идут.
+ */
 function NodeEditor ({ node, busy, error, onSave, onCancel }) {
   const outside = () => node.aliases.filter((alias) => alias.toLowerCase() !== node.name.toLowerCase())
   const [name, setName] = useState(node.name)
   const [aliases, setAliases] = useState(outside().join(', '))
+  const [events, setEvents] = useState(Boolean(node.eventsEnabled))
 
   useEffect(() => {
     setName(node.name)
     setAliases(node.aliases.filter((alias) => alias.toLowerCase() !== node.name.toLowerCase()).join(', '))
-  }, [node.id, node.name, node.aliases.join(',')])
+    setEvents(Boolean(node.eventsEnabled))
+  }, [node.id, node.name, node.aliases.join(','), node.eventsEnabled])
 
-  const submit = () => onSave(node.id, { name: name.trim(), aliases: splitAliases(aliases) })
+  const submit = () => onSave(node.id, {
+    name: name.trim(),
+    aliases: splitAliases(aliases),
+    events_enabled: Boolean(events),
+  })
 
   return h('div', { className: 'editor' }, [
     h('div', { key: 'title', className: 'row' }, [
@@ -337,6 +360,19 @@ function NodeEditor ({ node, busy, error, onSave, onCancel }) {
         value: aliases,
         onChange: (event) => setAliases(event.target.value),
       }),
+    ]),
+    h('div', { key: 'events', className: 'events' }, [
+      h('label', { key: 'l', className: 'row' }, [
+        h('input', {
+          key: 'c',
+          type: 'checkbox',
+          checked: Boolean(events),
+          onChange: (event) => setEvents(event.target.checked),
+        }),
+        h('span', { key: 't' }, t('nodes.events')),
+      ]),
+      h('div', { key: 'on', className: 'muted', style: { fontSize: 12 } }, t('nodes.eventsHint')),
+      h('div', { key: 'off', className: 'muted', style: { fontSize: 12 } }, t('nodes.eventsVoice')),
     ]),
     error
       ? h('div', { key: 'error', className: 'msg bad', style: { minHeight: 0 } }, error)
@@ -378,6 +414,7 @@ function NodeRow ({ node, busy, onEdit, onRevoke, onDelete }) {
         modeBadge('base', node.base, 'base'),
         modeBadge('upto', node.access, 'upto'),
         approverBadge(node.approver),
+        eventsBadge(node),
       ]),
       node.clientVersion ? h('div', { key: 'v', className: 'muted', style: { fontSize: 12 } }, node.clientVersion) : null,
     ]),

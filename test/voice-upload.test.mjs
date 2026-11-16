@@ -152,6 +152,10 @@ async function stand (t, { maxTransferBytes = 1_000_000, maxVoiceBytes = undefin
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}/dsh-nodes`
   const { node, token } = store.createNode({ name: 'phone', token: 'test-node-token' })
+  // Events are off by default since 0.4.0 (an owner's switch), and these tests are about the
+  // routes themselves: they say "this device may send events" explicitly instead of relying
+  // on a default that no longer exists.
+  store.updateNode(node.id, { events_enabled: 1 })
   t.after(() => {
     server.close()
     store.close()
