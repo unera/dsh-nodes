@@ -8,6 +8,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A version number is a commit that bumps `package.json`; git tags are not kept for every
 release, so the history of a version is the range between two such commits.
 
+## [0.4.1] - 2026-11-16
+
+### Fixed
+- The "events allowed" checkbox in the node form was stretched to the full width by the
+  shared `input { width: 100% }` rule, so it sat centred on its own line. A checkbox now
+  keeps its own size.
+
 ## [0.4.0] - 2026-11-16
 
 ### Added

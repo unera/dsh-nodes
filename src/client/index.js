@@ -58,6 +58,8 @@ const CSS = `
 .dshn button.copy.fail { color: #ef4444; }
 .dshn button.glyph:hover { background: rgba(128,128,128,.15); border-color: rgba(128,128,128,.4); }
 .dshn input, .dshn textarea { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; box-sizing: border-box; width: 100%; }
+/* A checkbox is not a text field: the 100% width pushed it onto its own line and centred it. */
+.dshn input[type="checkbox"] { width: auto; padding: 0; border: 0; margin: 0; }
 .dshn .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dshn .muted { opacity: .6; }
 .dshn .pair { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
