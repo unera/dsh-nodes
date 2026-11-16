@@ -51,7 +51,14 @@ model ──nodes_call──▶ plugin ──queue──▶ client on the node �
 
 ## Install
 
-Not published to npm; install from the checkout:
+The released package is on npm (`npm view @dr-co/dsh-nodes version` — 0.3.25 at the time of
+writing, and this checkout is ahead of it; `CHANGELOG.md` lists what came after):
+
+```sh
+npm install -g @dr-co/dsh-nodes
+```
+
+To install exactly this checkout instead:
 
 ```sh
 npm install /path/to/dsh-nodes
@@ -77,9 +84,11 @@ panel. The code is stored hashed only: reuse gives `409`, an expired code
 
 ## What a device sends to the host
 
-The full vocabulary — `command`, `voice`, `new-session`, `notify-button`, `notify-session`,
-`form` — lives in [`docs/device-events.md`](docs/device-events.md). It is the single source of
-truth for messages a device starts itself; everything else here is a command the host sends.
+The full vocabulary — `command`, `voice`, `new-session`, `voice-warmup`, `notify-button`,
+`notify-session`, `bug-report`, `form` — lives in [`docs/device-events.md`](docs/device-events.md),
+and the same list is machine-readable in `x-device-events` of the schema. A test compares the
+two, so neither can quietly fall behind. The reference is the single source of truth for
+messages a device starts itself; everything else here is a command the host sends.
 
 ## Calling a node from another plugin
 
@@ -130,26 +139,22 @@ No `seq`, no command: the device pushes, the host receives. `filetype` is one of
 is atomic (`.inprogress` → rename) and bounded by `maxTransferBytes`. After the file is stored
 the host emits `dsh-nodes/voice` `{node, nodeName, id, path, bytes, seconds}`.
 
-### Starting a new conversation
-
-```
-POST /v1/events  {"type":"voice","action":"new-session"}
-→ 202 {"accepted":true,"action":"new-session","device":"A059P"}
-```
-
-No text, no session: the host emits `dsh-nodes/voice-new-session` `{node, nodeName}`, and the voice
-plugin forgets which session this device was talking to. An unknown `action` is `400 bad_action`.
-
 ### Event types
 
-`POST /v1/events` carries `type`: `notify` (a button in the shade — the old behaviour,
-and the default when the field is absent) or `form` (answered `501` until form replies exist).
-Anything else is `400 bad_type`.
+`POST /v1/events` names what happened in `type` — `notify-button`, `notify-session`,
+`new-session`, `voice-warmup`, `bug-report`, or `form` (reserved, answered `501`). Anything else
+is `400 bad_type`. Only the first two are delivered into a session: a warm-up, a report about
+the app and a request for a new conversation are facts for the plugin that listens, and nothing
+reaches a session with them. Each type, its fields and its answer are in
+[`docs/device-events.md`](docs/device-events.md).
+
+An event without `type` (and the old `type: "notify"`) is still read by its fields and logged
+once as a guess: an installed app cannot be updated in the same minute as the server.
 
 Devices can also ask the host for attention without producing a message: `POST /v1/events`
-with `{ "voice": { "want": "record", "mode": "ptt" } }` and no text answers `202` and emits
+with `{ "voice": { "want": "record", "mode": "ptt" } }` and no `type` answers `202` and emits
 `dsh-nodes/voice-want` for whoever listens. Nothing is delivered to a session, and no session
-is required.
+is required. The shape is deprecated but supported — see the same reference.
 
 ## Access control on a node
 
@@ -170,6 +175,15 @@ approval dialog on the server side.
 `approver: local` is a promise: the node must announce the `session.approve`
 method. The server checks this and falls back to `none`, otherwise it would queue
 an approval command the node cannot execute.
+
+**Who is in charge.** Three of these four values (`access`, `base`, `allowEscalation`,
+`approver`) can be written by two sides: the owner in the admin panel, and the node in its own
+`PUT /v1/announce`. The owner wins. An announcement can narrow those rights and never widen
+them — a node whose panel says `ro` stays `ro` even if it announces `full`, and
+`allowEscalation: false` is not switched back on. What was refused comes back in the answer's
+`warnings` (and into the log as `policy-narrowed`), so a client author sees it instead of
+guessing. Only a field the owner has never set (`none`, or empty) is filled in by the node
+itself.
 
 Approval covers exactly one command and one step (`ro → rw → full`, up to two
 steps). The command is then re-run **from the beginning**, which the dialog says
@@ -200,13 +214,17 @@ absurd uptime.
 ## Routes
 
 Public: `POST /v1/enroll`, `GET /v1/enroll/{uuid}`, `POST /v1/pair`.
-Node (Bearer): `PUT /v1/announce`, `GET /v1/catalog`, `GET /v1/state`,
-`GET /v1/commands`, `POST /v1/commands/{seq}/result`, `GET /v1/ws` (upgrade).
+Node (Bearer): `PUT /v1/announce`, `GET /v1/state`, `GET /v1/commands`,
+`POST /v1/commands/{seq}/result`, `GET /v1/ws` (upgrade), `POST /v1/events`,
+`POST /v1/upload-file`, `POST /v1/download-file`
+(the last three are the device side: events a device starts, and files in both directions).
+There is no `/v1/catalog` route: the API catalog is read through the admin side.
 Admin: `/api/dsh-nodes/*` — private, behind the DSH session.
 
 The client-facing protocol is in [`spec/openapi.yaml`](spec/openapi.yaml) (English, like
-this file); the Russian translation is kept in
-[`docs/openapi.ru.yaml`](docs/openapi.ru.yaml).
+this file). It is the source of truth; the Russian translation in
+[`docs/openapi.ru.yaml`](docs/openapi.ru.yaml) lags behind it (it does not describe the device
+routes yet), so a client author should read the English one.
 The admin API is deliberately not in the spec: it is private and no third-party
 client should depend on it.
 

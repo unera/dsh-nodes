@@ -35,21 +35,33 @@ function wsFrames () {
   return kinds
 }
 
-/** Client API methods: what a node declares on announce. */
+/**
+ * Client API methods: what a node declares on announce.
+ *
+ * The declarations live in the client repository, which is checked out as a sibling of this
+ * one: `test/` → repository root → `<parent>`. CI may not have it at all, and then the check
+ * is skipped with the path it looked at — a skip that says nothing was the bug this replaces.
+ *
+ * @returns {{names: Set<string>|null, reason: string|null}}
+ */
 async function clientMethods () {
-  // the declarations live in the client repository; CI may not have it, so
-  // missing files are a reason to skip the check, not to fail
-  const modules = ['../dsh-node-client/lib/plugins/files.mjs', '../dsh-node-client/lib/plugins/session.mjs']
+  const modules = ['../../dsh-node-client/lib/plugins/files.mjs', '../../dsh-node-client/lib/plugins/session.mjs']
   const names = new Set()
   for (const path of modules) {
     try {
       const module = await import(new URL(path, import.meta.url).href)
       for (const method of module.api().methods) names.add(method.method)
-    } catch {
-      return null
+    } catch (error) {
+      return { names: null, reason: `${path}: ${error?.code ?? error?.message ?? error}` }
     }
   }
-  return names
+  return { names, reason: null }
+}
+
+/** The machine-readable list of the methods a node announces. */
+function declaredClientMethods () {
+  const declared = schema['x-client-methods'] ?? {}
+  return new Set(Object.values(declared).flat().map((name) => String(name)))
 }
 
 test('every server route is described in the schema', () => {
@@ -67,26 +79,49 @@ test('every websocket frame is described in the schema', () => {
   assert.deepEqual(missing, [], `кадры не описаны в x-ws-frames: ${missing.join(', ')}`)
 })
 
-test('every client API method is mentioned in the schema', async (t) => {
-  const methods = await clientMethods()
-  if (!methods) {
-    t.skip('клиентский репозиторий не найден рядом')
+test('every client API method is listed in the schema', async (t) => {
+  const { names, reason } = await clientMethods()
+  if (!names) {
+    // an honest skip: it names the path that was missing instead of hiding the check
+    t.skip(`клиентского репозитория нет рядом, сверять не с чем (${reason})`)
     return
   }
-  // we look where methods belong: in route and model descriptions
-  const described = new Set()
-  const walk = (node) => {
-    if (Array.isArray(node)) return node.forEach(walk)
-    if (node && typeof node === 'object') {
-      for (const [key, value] of Object.entries(node)) {
-        if (key === 'method' && typeof value === 'string') described.add(value)
-        walk(value)
-      }
-    }
-  }
-  walk(schema)
-  const missing = [...methods].filter((name) => !described.has(name))
-  assert.deepEqual(missing, [], `методы не описаны: ${missing.join(', ')}`)
+  // the list a client author can rely on is `x-client-methods`; a method that exists in the
+  // client and is not there is exactly the drift this test exists for
+  const declared = declaredClientMethods()
+  const missing = [...names].filter((name) => !declared.has(name))
+  assert.deepEqual(missing, [], `методы клиента не описаны в x-client-methods: ${missing.join(', ')}`)
+})
+
+test('the device event vocabulary matches docs/device-events.md', () => {
+  // The reference is docs/device-events.md: it is what a client author reads. The schema must
+  // carry exactly the same types, on the routes they belong to, or the two drift apart again.
+  const doc = read('docs/device-events.md')
+  const fromDoc = new Set([...doc.matchAll(/type:\s*"([a-z-]+)"/g)].map((match) => match[1]))
+  const declared = schema['x-device-events'] ?? {}
+  // `none` is the "no type at all" case, not a name
+  const fromSpec = new Set(Object.values(declared).flat().map(String).filter((type) => type !== 'none'))
+
+  assert.ok(fromDoc.size >= 6, `в справочнике должен быть словарь, а нашлось: ${[...fromDoc].join(', ')}`)
+  const onlyDoc = [...fromDoc].filter((type) => !fromSpec.has(type))
+  const onlySpec = [...fromSpec].filter((type) => !fromDoc.has(type))
+  assert.deepEqual(onlyDoc, [], `есть в docs/device-events.md, нет в x-device-events: ${onlyDoc.join(', ')}`)
+  assert.deepEqual(onlySpec, [], `есть в x-device-events, нет в docs/device-events.md: ${onlySpec.join(', ')}`)
+
+  // and the enum of the field must be the same list: a generated client reads the enum, not
+  // the extension
+  const enumOf = schema.paths?.['/v1/events']?.post?.requestBody?.content?.['application/json']
+    ?.schema?.properties?.type?.enum ?? []
+  const eventsTypes = new Set([...(declared['/v1/events'] ?? []), ...(declared['/v1/events (legacy)'] ?? [])]
+    .map(String).filter((type) => type !== 'none'))
+  assert.deepEqual([...eventsTypes].filter((type) => !enumOf.includes(type)), [],
+    'типы /v1/events в x-device-events должны быть в enum поля type')
+  assert.deepEqual(enumOf.filter((type) => !eventsTypes.has(type)), [],
+    'enum поля type не должен знать типов, которых нет в x-device-events')
+  // the upload route is where a whole recording arrives: `type=voice` names it, not an action
+  const uploadType = schema.paths?.['/v1/upload-file']?.post?.parameters
+    ?.find((parameter) => parameter.name === 'type')?.schema?.enum ?? []
+  assert.deepEqual(uploadType, ['voice'], 'у /v1/upload-file должен быть type=voice')
 })
 
 test('the protocol conventions are described in the schema', () => {

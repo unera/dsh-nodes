@@ -14,6 +14,7 @@
     "lib/",
     "spec/",
     "README.md",
+    "CHANGELOG.md",
     "cordis.patch.yml",
     "docs"
   ],

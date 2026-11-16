@@ -91,6 +91,19 @@ x-client-methods:
     - approve
     - debug_info
 
+# Types a device may send, and the route each one lives on. A test compares this with
+# `docs/device-events.md` both ways, so neither the reference nor the schema can lag behind
+# the vocabulary in `lib/voice-upload.mjs` (`eventTypeOf`).
+x-device-events:
+  # POST /v1/events, the `type` field
+  /v1/events: [notify-button, notify-session, new-session, voice-warmup, bug-report, form]
+  # still accepted, and read by the fields of the body instead of the name
+  /v1/events (legacy): [notify, none]
+  # the type names the route there, so no `action` is needed
+  /v1/upload-file?type=voice: [voice]
+  # not an event: the answer to a command, which is why it carries `seq`
+  /v1/commands/{seq}/result: [command]
+
 # Protocol conventions that a single route cannot show.
 # Details — spec/AGENTS.md; here short and machine-readable.
 x-protocol-rules:
@@ -280,6 +293,14 @@ paths:
 
         Without the socket this route carries no presence: the socket says "I am
         waiting", announce says "this is what I am".
+
+        **Who owns the permissions.** `access`, `base`, `allowEscalation` and `approver` can be
+        written both here and by the owner in the admin panel, so one of them has to win: the
+        owner does. An announcement may narrow those values and never widen them — a node
+        whose panel says `ro` stays `ro` even if it announces `full`, and `allowEscalation:
+        false` is not turned back on. What was refused comes back in `warnings` (and into the
+        plugin log as `policy-narrowed`), so a client author can see it instead of guessing.
+        The panel is authoritative, the announcement is a request.
       requestBody:
         required: true
         content:
@@ -487,18 +508,39 @@ paths:
   /v1/events:
     post:
       tags: [devices]
-      summary: Событие устройства
+      summary: An event started by the device
       description: |
-        Узел сообщает, что на устройстве что-то произошло: нажата кнопка в
-        уведомлении, сработал будильник, пришёл сигнал от человека.
+        A device says that something happened on it: the person pressed a button in the
+        notification shade, came back to the app, opened the voice screen, or the app itself
+        degraded. The device reports a fact; the meaning is restored by the host, which never
+        takes the person's words from the client.
 
-        Имя устройства, время и обрамление добавляет сервер: клиенту нельзя
-        доверять трактовку смысла, он сообщает только факт. Событие кладётся в
-        указанную сессию как пользовательское сообщение с источником
-        `dsh-nodes`, после чего ход просыпается.
+        The vocabulary is one list, and it is the same in `docs/device-events.md` (the
+        reference), in `x-device-events` below and in `lib/voice-upload.mjs` (`eventTypeOf`):
 
-        Ответ приходит до того, как модель начнёт работу: иначе устройство
-        ждало бы окончания хода.
+        | `type` | what it means | answer |
+        | --- | --- | --- |
+        | `notify-button` | a button in the shade was pressed; needs `notification`, may carry `button` and `id` | 200 `{delivered, session}`, or 200 `{delivered:false, already:true}` |
+        | `notify-session` | the person typed text in the shade; needs `session` and `text`, may carry `purpose` and `id` | 200 `{delivered, session}` |
+        | `new-session` | start a new conversation with this device; no fields | 202 `{accepted:true, device}` |
+        | `voice-warmup` | the voice screen was opened; no fields, nothing is delivered | 202 `{accepted:true}` |
+        | `bug-report` | the app degraded; `kind` (free text), `text`, `app`, `id` | 202 `{accepted:true, id}` |
+        | `form` | reserved for form replies | 501 `form_not_supported` |
+
+        **Compatibility.** A body without `type` and the old `type: "notify"` are still
+        accepted: if the body names a `notification` it is `notify-button`, otherwise
+        `notify-session`. The host logs the guess once — an installed app cannot be updated in
+        the same minute as the server, but a new client must send `type`.
+
+        **Asking to record.** A body of the shape `{"voice":{"want":"record"}}` is not an event
+        either: it is the oldest way for a phone to say "I want to talk". It answers 202 and the
+        host emits `dsh-nodes/voice-want`; nothing reaches a session. Kept for the clients that
+        are still installed, and it takes no `type`.
+
+        The device name, the time and the interpretation are added by the server: the client is
+        not allowed to speak for the person. When the event is delivered, it lands in the named
+        session as a user message with source `dsh-nodes` and wakes the turn. The answer comes
+        before the model starts working, otherwise the device would wait for a whole turn.
       security:
         - nodeToken: []
       requestBody:
@@ -507,85 +549,203 @@ paths:
           application/json:
             schema:
               type: object
-              required: [session, text]
               properties:
+                type:
+                  type: string
+                  enum: [notify-button, notify-session, new-session, voice-warmup, bug-report, form, notify]
+                  description: |
+                    What happened. Absent or `notify` — the host guesses from the fields and
+                    says so once in the log; a new client always sends `type`.
                 session:
                   type: string
-                  description: Идентификатор сессии вида `session-<uuid>`
+                  description: Session id of the form `session-<uuid>`; required by `notify-session`
                 text:
                   type: string
+                  description: The words from the person; required by `notify-session`
+                notification:
+                  type: string
+                  description: Id of the notification the pressed button belongs to; required by `notify-button`
                 button:
                   type: string
-                  description: Метка нажатой кнопки, если событие из уведомления
+                  description: Mark of the pressed button. The label, the purpose and the session come from the server's own record
                 purpose:
                   type: string
-                  description: Зачем это событие — модель увидит это первым
+                  description: Why the event was sent; the model sees it first
                 id:
                   type: string
-                  description: Идентификатор события для дедупликации
+                  maxLength: 128
+                  description: Event id, for deduplication and for the plugin that listens
+                kind:
+                  type: string
+                  maxLength: 64
+                  description: Degradation kind of a `bug-report`; free text on purpose
+                app:
+                  type: string
+                  maxLength: 64
+                  description: Version of the app that reported the problem
+                voice:
+                  type: object
+                  description: |
+                    The deprecated "I want to talk" shape: `{"want":"record"}` with no `type`.
+                    Not an event — the host only emits `dsh-nodes/voice-want` for the voice plugin.
+                  required: [want]
+                  properties:
+                    want:
+                      type: string
+                      enum: [record]
+                    mode:
+                      type: string
+                      enum: [ptt, toggle]
+                      description: Push-to-talk or a toggle; anything else counts as `ptt`
       responses:
-        '200':
-          description: Событие принято и передано агенту
+        "200":
+          description: accepted and delivered into the session
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   delivered: { type: boolean }
+                  already:
+                    type: boolean
+                    description: the button was pressed before, nothing was delivered twice
                   session: { type: string }
+        "202":
+          description: accepted, but there is nothing to deliver (`new-session`, `voice-warmup`, `bug-report`, `voice.want`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: boolean }
                   device: { type: string }
-        '400':
-          description: Нет сессии или текста
-        '403':
-          description: Для устройства события выключены
-        '404':
-          description: Сессии больше нет
+                  id: { type: string }
+                  mode:
+                    type: string
+                    description: for `voice.want` — what the device asked for
+        "400":
+          description: |
+            `bad_type` — the type is not in the vocabulary; `bad_request` — a required field
+            of that type is missing (a session, the words, the notification number)
+        "403":
+          description: |
+            Events are switched off for this device in the admin panel (`events_disabled`);
+            `voice-want` is refused by the same rule
+        "404":
+          description: The session is gone
+        "501":
+          description: |
+            `form_not_supported` — the form vocabulary is reserved, this host does not accept
+            form replies yet
 
   /v1/upload-file:
     post:
       tags: [transfer]
-      summary: Передать файл с узла на сервер (хост)
+      summary: Send a file from the node to the host
       description: |
-        Один HTTP-запрос вместо прежних кусков. Требуется `content-length` и
-        `seq` в параметрах запроса; данные пишутся в `<path>.inprogress` и
-        переименовываются только после сверки sha256.
+        One HTTP request instead of the old chunks. Two different things live here, and the
+        `type` parameter is what tells them apart:
 
-        Исключение — `pipeFromDevice`: тело может идти chunked, без
-        `content-length`, тогда файл остаётся `.inprogress` до вердикта команды.
+        **A file of an issued command** (`copyFromDevice`, and the chunked stream of
+        `pipeFromDevice`). `seq` is mandatory: the command itself is the ticket, and a closed
+        command no longer serves a path. `content-length` is required except for the
+        `pipeFromDevice` stream, which is chunked on purpose. The data goes to
+        `<hostPath>.inprogress` and is renamed only after the sha256 check — or, for a stream,
+        only after the command's verdict.
 
-        Длина тела не ограничена `maxBodyBytes`: тот потолок только для JSON.
-        Передачу ограничивает `maxTransferBytes` — объявленная длина больше
-        предела получает `413` до записи, поток обрывается, как только перевалил
-        за предел (`.inprogress` удаляется).
+        **A recording the device pushes by itself** — `?type=voice`. No `seq` and no command:
+        authorisation is the node token, the path is chosen by the server
+        (`$DSH_HOME/cache/voice/incoming/<node>/<id>.<filetype>`, never by the device), and the
+        whole file is either stored or refused. Afterwards the host emits `dsh-nodes/voice`
+        with `{node, nodeName, id, path, bytes, seconds}`. Details: `docs/device-events.md`.
+
+        The body length is not bounded by `maxBodyBytes`: that ceiling is for JSON only. A
+        transfer is bounded by `maxTransferBytes` — a declared length above the limit gets 413
+        before anything is written, a chunked stream is cut off as soon as it crosses the limit
+        and its `.inprogress` is removed.
       security:
         - nodeToken: []
       parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [voice]
+          description: |
+            `voice` — a recording pushed by the device itself: no `seq`, path chosen by the
+            server. Absent — an ordinary transfer inside an issued command.
         - name: seq
           in: query
-          required: true
+          required: false
+          description: |
+            Number of the issued command. Mandatory for every transfer except `type=voice`.
           schema: { type: integer }
+        - name: filetype
+          in: query
+          required: false
+          description: For `type=voice` only, and mandatory there.
+          schema:
+            type: string
+            enum: [wav, ogg, opus, mp3, m4a, flac]
+        - name: id
+          in: query
+          required: false
+          description: |
+            For `type=voice` only: the identity of one exchange, `[A-Za-z0-9_-]` up to 64
+            characters. A retry with the same id is recognised by the plugin; a missing id is
+            minted by the server.
+          schema: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }
+        - name: synth
+          in: query
+          required: false
+          description: |
+            For `type=voice` only: which side speaks the answer. `device` (default, and what a
+            typo becomes) — the phone reads the text itself; `host` — the host synthesizes and
+            the device only plays the file.
+          schema:
+            type: string
+            enum: [device, host]
       requestBody:
         required: true
         content:
           application/octet-stream:
             schema: { type: string, format: binary }
       responses:
-        '200':
-          description: Файл принят, sha256 совпал
-        '400':
-          description: Нет длины, имени или seq
-        '411':
-          description: Нет `content-length` у передачи, которая не является потоком `pipeFromDevice`
-        '413':
-          description: Тело больше `maxTransferBytes`; для объявленной длины — до записи, для потока — обрыв на ходу
+        "200":
+          description: the file of a command is accepted, the sha256 matched
+        "202":
+          description: |
+            Accepted with `type=voice`: `{accepted:true, id, path, bytes, seconds}`. Nothing
+            waits for a verdict — the recording is either whole or absent.
+        "400":
+          description: |
+            No length, name or `seq`; `bad_filetype`, `bad_id` for a voice recording; an
+            incomplete body (`incomplete`) or one that broke off (`transfer_failed`)
+        "403":
+          description: Events are switched off for this device (`events_disabled`) — a pushed recording is an event
+        "409":
+          description: The sha256 did not match (`hash_mismatch`); the file is not stored
+        "411":
+          description: No `content-length` on a transfer that is not the `pipeFromDevice` stream
+        "413":
+          description: |
+            The body is above `maxTransferBytes`; for a declared length before writing, for a
+            stream by cutting it off
 
   /v1/download-file:
     post:
       tags: [transfer]
-      summary: Передать файл с сервера (хоста) на узел
+      summary: Send a file from the host to the node
       description: |
-        Симметричен выгрузке: сервер отдаёт поток, узел сохраняет его через
-        `.inprogress` и проверяет sha256 перед переименованием.
+        Symmetric to the upload: the server streams the file, the node saves it through
+        `.inprogress` and checks the sha256 before renaming.
+
+        Only commands that carry a file are served here: `copyToDevice`, `pipeToDevice` and,
+        of the voice commands, `voice.answer` and `voice.play`. The path comes from
+        `command.args.path`, and `seq` is the ticket — a closed command serves nothing. Without
+        that rule a device could not download the recording an answer points at, because the
+        answer itself is the only live command.
       security:
         - nodeToken: []
       parameters:
@@ -796,10 +956,17 @@ components:
         access:
           type: string
           enum: [ro, rw, full]
-          description: ceiling on this machine, set by the machine owner
+          description: |
+            Ceiling on this machine. The owner's value wins: whatever the admin panel (or
+            the admin API) has set is the ceiling this field may only *narrow*. A node that
+            announces `full` while the panel says `ro` stays `ro`, and the answer's
+            `warnings` says so. Only a node the owner has not set anything on (`none`)
+            fills the value in itself.
         allowEscalation:
           type: boolean
-          description: deprecated, kept for older clients; prefer `approver`
+          description: |
+            Deprecated, kept for older clients; prefer `approver`. Can be turned off by the
+            node, never back on: `false` in the panel stays `false` whatever is announced.
         approver:
           type: string
           enum: [local, server, none]
@@ -809,6 +976,9 @@ components:
             server takes the promise as given, and a node without the command
             answers `unknown_method`. `server` — the human in the DSH dialog.
             `none` — never ask.
+
+            The owner's `none` is not undone by an announcement; between the other
+            values the node still chooses, it knows what it implements.
         base:
           type: string
           enum: [ro, rw, full]
@@ -817,6 +987,9 @@ components:
             ceiling): then widening needs a human decision, either after a denial
             or up front through `sandboxStrict`. Confirmed commands are not
             lowered by it.
+
+            Narrows only, like `access`: a start mode the owner set in the panel is never
+            widened by an announcement.
         workdir: { type: string }
         uptimeSeconds:
           type: number
