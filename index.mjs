@@ -21,7 +21,7 @@ import { createConnStats } from './lib/conn-stats.mjs'
 import { ArgsError, checkArgs } from './lib/args.mjs'
 import { createPresence } from './lib/ws.mjs'
 import { renderAdmin } from './lib/admin.mjs'
-import { handleAdmin, handleAdminOp } from './lib/admin-api.mjs'
+import { AdminError, handleAdmin, handleAdminOp, readJsonBody } from './lib/admin-api.mjs'
 import { PROMPT_TEXT, SECTION_NAME, SECTION_ORDER } from './lib/prompt.mjs'
 import { createTools } from './lib/tools.mjs'
 import { createNodeCaller } from './lib/call.mjs'
@@ -350,10 +350,13 @@ function mountAdminRoutes ({ ctx, config, getDeps }) {
               const deps = depsOf(request)
               if (!deps) return json(503, { code: 'starting', message: 'плагин ещё поднимается' })
               if (route.streaming) return route.run(deps, request)
-              const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}
+              const body = request.method === 'POST' ? await readJsonBody(request, config.maxBodyBytes) : {}
               const result = await route.run(deps, body)
               return json(result.status, result.body)
             } catch (error) {
+              // a refused body is the caller's mistake, not a broken plugin: 413/400, as on
+              // the node routes
+              if (error instanceof AdminError) return json(error.status, { code: error.code, message: error.message })
               return json(500, { code: 'internal', message: String(error?.message ?? error) })
             }
           },
