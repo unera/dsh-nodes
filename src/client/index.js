@@ -741,7 +741,13 @@ function NodesPanel () {
               run({ op: 'token', id: node.id }, t('nodes.tokenReissued'))
             },
               onDelete: (id) => {
-                if (typeof window !== 'undefined' && !window.confirm(`Удалить узел ${id}?`)) return
+                // the dialog names the node the way a person knows it, and keeps the id for
+                // the case where two rows look alike: "Удалить узел 21?" was a bare number
+                const label = node.name || node.aliases?.[0] || ''
+                const question = label
+                  ? t('confirm.delete', { name: label, id: node.id })
+                  : t('confirm.deleteBare', { id: node.id })
+                if (typeof window !== 'undefined' && !window.confirm(question)) return
                 if (editing === id) setEditing(null)
                 run({ op: 'delete', id }, t('nodes.deleted'))
               },

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2] - 2026-11-17
+### Changed
+- **"Удалить узел 21?" names the node.** The delete dialog used to print the bare id, which is
+  the kind of label one confirms without reading — the token revoke dialog next to it already
+  named the device. It now says «Удалить узел «matrix.uvw.ru» (id 21)?», with a separate wording
+  for a node that has no name yet, in all three languages.
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
