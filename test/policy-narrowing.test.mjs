@@ -150,3 +150,22 @@ test('the admin accepts the short spelling of `access` and stores the DSH one', 
   assert.equal(updateNode({ store, queue, config }, node.id, { access: 'full' }).status, 200)
   assert.equal(store.node(node.id).access, 'danger-full-access')
 })
+
+test('an announcement cannot turn on device events', async () => {
+  // The events switch belongs to the owner alone. `announce` does not read the field at
+  // all, so this is a guard against a future edit that "helpfully" starts honouring it:
+  // a device that could enable its own events would undo the switch for every host that
+  // turned it off on purpose.
+  const { node, token } = nodeByAdmin('events-off', {})
+  assert.equal(store.node(node.id).events_enabled, 0, 'свежий узел приходит с выключенными событиями')
+
+  const answer = await announce(token, { events_enabled: true })
+  assert.equal(answer.status, 200, JSON.stringify(answer.body))
+  assert.equal(store.node(node.id).events_enabled, 0, 'объявление не включает события')
+
+  // And the switch the owner does own still works, so the assertion above is about
+  // announce and not about a column that can never change.
+  const updated = updateNode({ store, queue, config }, node.id, { events_enabled: true })
+  assert.equal(updated.status, 200, JSON.stringify(updated.body))
+  assert.equal(store.node(node.id).events_enabled, 1, 'владелец включает флаг из панели')
+})

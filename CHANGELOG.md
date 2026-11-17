@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A version number is a commit that bumps `package.json`; git tags are not kept for every
 release, so the history of a version is the range between two such commits.
 
+**Which versions were actually published:** the registry has `0.3.25` and then `0.4.x`.
+Versions `0.3.26`–`0.3.40` exist only as commits in this repository — they were written down
+here while the package was not being published, and the sections below are kept as history,
+not as releases. A consumer comparing this file with npm should read the delta as
+`0.3.25 → 0.4.0`, not as forty releases.
+
 ## [0.4.1] - 2026-11-16
 
 ### Fixed
@@ -34,6 +40,11 @@ release, so the history of a version is the range between two such commits.
 
 ### Changed
 
+- **breaking for existing nodes:** a node no longer widens its own permissions. `announce`
+  used to let a device ask for `access`, `base`, `allowEscalation` and `approver`, and the
+  request was honoured; after this release those fields are ignored and the node stays inside
+  the ceiling its owner set. A device that was running with wider rights than the admin panel
+  shows comes back to the owner's limit on the next announce.
 - **breaking for existing nodes:** events are now off unless the owner allows them. The column
   defaults to `0`, so **after the upgrade every node that already exists stops accepting
   events** until the switch is turned on: `/v1/events` answers `403 events_disabled` for
