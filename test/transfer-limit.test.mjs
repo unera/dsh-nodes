@@ -62,7 +62,8 @@ after(async () => {
 /** Issue a command the way the server does before a transfer. */
 function issue (method, args) {
   const node = store.nodeByAlias('limit-node')
-  return queue.enqueue({ nodeId: node.id, api: 1, method, args, timeout: 30 })
+  // the fixture issues the command itself, so it also carries the host authority
+  return queue.enqueue({ nodeId: node.id, api: 1, method, args, timeout: 30, hostRoots: [dir] })
 }
 
 /** A body of exactly `total` bytes, sent chunked: no content-length, as a pipe does. */

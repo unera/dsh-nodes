@@ -42,6 +42,8 @@ test('upload: the body goes to .inprogress, sha256 and mode are verified', async
   const { seq } = queue.enqueue({
     nodeId: 1, api: 9, method: 'files.upload',
     args: { path: target, size: body.length }, timeout: 30,
+    // the command carries the host authority; without it the transfer is refused by design
+    hostRoots: [dir],
   })
   const command = requireCommand({ queue, node, method: 'files.upload', seq })
   // the body is passed as a stream, the way the http server does it
@@ -61,7 +63,10 @@ test('upload: the body goes to .inprogress, sha256 and mode are verified', async
 test('the size from the command does not match content-length: 412 and no file', async () => {
   const queue = new Queue({ epoch: 1 })
   const target = join(dir, 'mismatch.bin')
-  const { seq } = queue.enqueue({ nodeId: 1, api: 9, method: 'files.upload', args: { path: target, size: 99 }, timeout: 30 })
+  const { seq } = queue.enqueue({
+    nodeId: 1, api: 9, method: 'files.upload',
+    args: { path: target, size: 99 }, timeout: 30, hostRoots: [dir],
+  })
   const command = requireCommand({ queue, node, method: 'files.upload', seq })
   const body = Buffer.from('abc')
   await assert.rejects(

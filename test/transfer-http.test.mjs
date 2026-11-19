@@ -47,7 +47,8 @@ after(async () => {
 /** Issue a command the way the server does before a transfer. */
 function issue (method, args) {
   const node = store.nodeByAlias('test-node')
-  return queue.enqueue({ nodeId: node.id, api: 1, method, args, timeout: 30 })
+  // the fixture issues the command itself, so it also carries the host authority
+  return queue.enqueue({ nodeId: node.id, api: 1, method, args, timeout: 30, hostRoots: [dir] })
 }
 
 test('download-file returns the file with its size and the node token', async () => {

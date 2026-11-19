@@ -506,7 +506,7 @@ test('a notify-session needs both a session and words', async (t) => {
 })
 
 /** Register a voice API the way a real client announces it, then queue one command. */
-function voiceCommand (store, queue, node, method, args) {
+function voiceCommand (store, queue, node, method, args, hostRoots = null) {
   store.announce(node.id, [{
     name: 'voice',
     version: 'test',
@@ -517,7 +517,11 @@ function voiceCommand (store, queue, node, method, args) {
     ],
   }], [], {})
   const apiId = store.nodeApis(node.id)[0]
-  const { seq } = queue.enqueue({ nodeId: node.id, api: apiId, method, args, timeout: 10 })
+  // a voice command serves a host file, so it carries the same authority a real tool stamps
+  const { seq } = queue.enqueue({
+    nodeId: node.id, api: apiId, method, args, timeout: 10,
+    ...(hostRoots ? { hostRoots } : {}),
+  })
   return { seq, apiId }
 }
 
@@ -525,7 +529,7 @@ test('a voice answer may serve its own file by its seq', async (t) => {
   const { base, token, store, queue, node, dir } = await stand(t)
   const file = join(dir, 'answer.ogg')
   writeFileSync(file, Buffer.from('OggS-test'))
-  const { seq } = voiceCommand(store, queue, node, 'answer', { id: 'ex-1', path: file })
+  const { seq } = voiceCommand(store, queue, node, 'answer', { id: 'ex-1', path: file }, [dir])
   queue.take(node.id, { limit: 5 })
 
   const answer = await fetch(`${base}/v1/download-file?seq=${seq}`, {
@@ -540,7 +544,7 @@ test('a record command still cannot serve a file', async (t) => {
   const { base, token, store, queue, node, dir } = await stand(t)
   const file = join(dir, 'take.wav')
   writeFileSync(file, Buffer.from('RIFF'))
-  const { seq } = voiceCommand(store, queue, node, 'record', { path: file })
+  const { seq } = voiceCommand(store, queue, node, 'record', { path: file }, [dir])
   queue.take(node.id, { limit: 5 })
 
   const answer = await fetch(`${base}/v1/download-file?seq=${seq}`, {

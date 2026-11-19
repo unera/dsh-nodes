@@ -1,20 +1,36 @@
 # Changelog
 
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
+project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.3] - 2026-11-19
+### Fixed
+- **A host path from a command is checked against the session that issued it.** `nodes_call` could
+  name any `hostPath`, and the transfer endpoint wrote that file as the server process — the host
+  side of a copy had no permission check at all. The command now carries the session's allowed
+  directories (`hostRoots`), decided where the session still exists, and the transfer refuses a
+  command without that stamp instead of trusting it.
+- **Paths are canonical before they are compared.** The old check was a string prefix, so `..`
+  walked out of the directory and a symlink pointed out of it; `/tmp/work-evil` also passed for
+  `/tmp/work`. `lib/paths.mjs` resolves the existing part of a path through `realpath`, appends the
+  rest, and compares the result with a separator — and the canonical path is what gets opened, so
+  the checked path and the used path are the same string.
+- The voice upload route and the voice commands stamp their authority too: their paths are computed
+  by the server, and the transfer layer no longer has a way to skip the check.
+
 ## [0.4.2] - 2026-11-17
 ### Changed
 - **"Удалить узел 21?" names the node.** The delete dialog used to print the bare id, which is
   the kind of label one confirms without reading — the token revoke dialog next to it already
   named the device. It now says «Удалить узел «matrix.uvw.ru» (id 21)?», with a separate wording
   for a node that has no name yet, in all three languages.
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
-project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 A version number is a commit that bumps `package.json`; git tags are not kept for every
 release, so the history of a version is the range between two such commits.
 
-**Which versions were actually published:** the registry has `0.3.25` and then `0.4.x`.
+**Which versions were actually published:** the registry has `0.3.25`, then `0.4.x`.
 Versions `0.3.26`–`0.3.40` exist only as commits in this repository — they were written down
 here while the package was not being published, and the sections below are kept as history,
 not as releases. A consumer comparing this file with npm should read the delta as

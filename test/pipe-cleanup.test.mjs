@@ -67,6 +67,7 @@ function issuePipe (name) {
     api: 1,
     method: 'pipeFromDevice',
     args: { command: 'echo', hostPath },
+    hostRoots: [dir],
     timeout: 5,
   })
   return { seq, hostPath, part: `${hostPath}.inprogress` }
@@ -246,7 +247,7 @@ test('a pipe removed from under the transfer answers 409 pipe_gone, not 500', as
     () => receive({
       stream: req,
       headers: req.headers,
-      command: { method: 'pipeFromDevice', args: { hostPath } },
+      command: { method: 'pipeFromDevice', args: { hostPath }, hostRoots: [dir] },
       mode: null,
       config: { maxTransferBytes: 1024 * 1024 },
     }),
