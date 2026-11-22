@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-11-22
+### Fixed
+- **A waiting caller is no longer lost when the event loop empties.** The timeout timer of a
+  queued command is `unref`'d — deliberate, so that a command nobody waits for does not keep the
+  process alive. But a caller that *does* wait (a plugin through `nodes.call`, for example) then
+  depended on something else keeping the loop busy: on node 22 the loop had nothing left, node
+  ended the process under the pending promise, and the answer came back as
+  `Promise resolution is still pending but the event loop has already resolved`. The wait now
+  holds the loop itself, one second past its own deadline, and releases it when the answer or the
+  timeout arrives. Found by CI: seven `call` tests were cancelled on node 22 while node 24 passed.
+
 ## [0.4.4] - 2026-11-22
 ### Added
 - **A node can download and upload its own naming.** `GET /v1/naming` returns the name and the
