@@ -339,6 +339,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/NodeState"
 
+  /v1/naming:
+    get:
+      tags: [node]
+      summary: The node's name and aliases
+      description: |
+        What a person called this node: the name it is shown by and the aliases it
+        answers to (`aliases` always contains `name`). A client keeps its own copy —
+        editing it on the device changes nothing here — and this route is how the two
+        copies are swapped: download with `GET`, upload with `PUT`.
+      security: [{ nodeToken: [] }]
+      responses:
+        "200":
+          description: the naming stored on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeNaming"
+    put:
+      tags: [node]
+      summary: Replace the node's name and aliases
+      description: |
+        `name` is a rename (the old name stops being an alias, the new one becomes one),
+        `aliases` is the full list — what is not in it is removed, and the name always
+        stays in it. Both keys are optional; a key outside them is `400 bad_request`.
+
+        An alias held by another node is not an error: everything else is applied and
+        the answer carries `rejected` with those aliases. A `name` held by another node
+        is `409 alias_taken`, because a rename has no partial form.
+
+        `403` when the owner turned events off does not apply here: the naming is not an
+        event.
+      security: [{ nodeToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                  description: the new name; it becomes an alias
+                aliases:
+                  type: array
+                  maxItems: 16
+                  items: { type: string }
+                  description: the full alias list; the name is added to it
+      responses:
+        "200":
+          description: the naming as it now stands on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeNaming"
+        "400": { description: "bad request: an unknown key, an empty name, aliases that are not a list" }
+        "409": { description: "alias_taken: the new name belongs to another node" }
+
   /v1/commands:
     get:
       tags: [node]
@@ -1075,6 +1133,29 @@ components:
         escalation:
           type: integer
           description: escalation step on which the command ran
+
+    NodeNaming:
+      type: object
+      description: |
+        Answer to `GET`/`PUT /v1/naming`: the naming of this node. The name is not a
+        label but an address — a node is called by its name or by any alias, which is
+        why the name is always in `aliases`.
+      properties:
+        node:
+          type: integer
+          description: numeric node id
+        name:
+          type: string
+        aliases:
+          type: array
+          items: { type: string }
+          description: the name and every other alias the node answers to
+        rejected:
+          type: array
+          items: { type: string }
+          description: |
+            aliases asked for but held by another node: not written, and named here so
+            that the caller can say which ones did not stick. Present on `PUT` only.
 
     NodeState:
       type: object

@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-11-22
+### Added
+- **A node can download and upload its own naming.** `GET /v1/naming` returns the name and the
+  aliases the server holds for this node; `PUT /v1/naming` replaces them. Needed by the Android
+  client, which now keeps its own copy of the naming: editing it there changes nothing on the
+  server, and these two routes are the explicit "download from the server" and "send to the
+  server" buttons. Both are behind the node token, like every other node route.
+- The rules of a naming change live in `lib/naming.mjs` and are shared: the name is always an
+  alias, `aliases` is a full replacement, another node's alias comes back in `rejected`, another
+  node's name is `409 alias_taken`. The admin panel's `updateNode` calls the same module instead
+  of carrying a second copy of those rules — and now refuses a non-string `name` and an alias
+  longer than 64 characters instead of quietly ignoring or storing them.
+
 ## [0.4.3] - 2026-11-19
 ### Fixed
 - **A host path from a command is checked against the session that issued it.** `nodes_call` could

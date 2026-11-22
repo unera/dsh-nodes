@@ -271,6 +271,57 @@ paths:
                       node: { type: integer }
                       online: { type: boolean }
 
+  /v1/naming:
+    get:
+      tags: [node]
+      summary: Имя и алиасы узла
+      description: |
+        Как этот узел назвал человек: имя, под которым он виден, и алиасы, по которым
+        он отзывается (`aliases` всегда содержит `name`). У клиента своя копия — правка
+        на устройстве здесь ничего не меняет, — и эти два метода и есть обмен копиями:
+        скачать (`GET`) и отправить (`PUT`).
+      security: [{ nodeToken: [] }]
+      responses:
+        "200":
+          description: наименование, которое хранится на сервере
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeNaming"
+    put:
+      tags: [node]
+      summary: Заменить имя и алиасы узла
+      description: |
+        `name` — это переименование (старое имя перестаёт быть алиасом, новое им
+        становится), `aliases` — полный список: чего в нём нет, то удаляется, а имя
+        в нём остаётся всегда. Оба ключа необязательны; ключ помимо них — `400`.
+
+        Алиас, занятый другим узлом, — не ошибка: всё остальное применяется, а в
+        ответе приходит `rejected` с этими алиасами. Занятое имя — `409 alias_taken`:
+        у переименования нет половинчатой формы.
+      security: [{ nodeToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                aliases:
+                  type: array
+                  maxItems: 16
+                  items: { type: string }
+      responses:
+        "200":
+          description: наименование, каким оно стало на сервере
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeNaming"
+        "400": { description: "неизвестный ключ, пустое имя, алиасы не списком" }
+        "409": { description: "alias_taken: имя занято другим узлом" }
+
   /v1/commands:
     get:
       tags: [node]
@@ -448,6 +499,22 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    NodeNaming:
+      type: object
+      description: |
+        Ответ `GET`/`PUT /v1/naming`: наименование этого узла. Имя — не подпись, а
+        адрес: узел зовут по имени или по любому алиасу, поэтому имя всегда есть в
+        `aliases`.
+      properties:
+        node: { type: integer }
+        name: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        rejected:
+          type: array
+          items: { type: string }
+          description: алиасы, занятые другими узлами — не записаны; только в ответе на `PUT`
     Error:
       type: object
       required: [code, message]
